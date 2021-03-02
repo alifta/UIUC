@@ -5,7 +5,6 @@ import os
 import json
 import pickle
 
-
 import numpy as np
 import pandas as pd
 
@@ -13,7 +12,6 @@ import sqlite3
 
 import matplotlib.pyplot as plt
 from pylab import matplotlib, cm
-
 
 # Database
 # --------
@@ -75,6 +73,33 @@ def db_row_count(db, table, output=False):
 # ---------------
 
 
+def path_edit(file_names, file_label='', folder_name='', folder_label=''):
+    """
+    Edit paths of a list of file names as the following format
+    {folder_name}/{folder_label}{file_name}_{file_label}.{extension}
+    """
+    # Check if list of file name is empty, return None
+    if len(file_names) == 0:
+        return
+
+    # If folder name is empty, set it to current folder
+    if len(folder_name) == 0:
+        folder_name = os.getcwd()
+
+    paths = []
+    for file_name in file_names:
+        file_name_new = ''
+        if len(file_label) != 0:
+            file_name_new = file_name.split('.')[
+                0] + '_' + file_label + '.' + file_name.split('.')[1]
+        else:
+            file_name_new = file_name
+        # Edit and add the new path to list of file name
+        paths.append(os.path.join(folder_name, folder_label, file_name_new))
+
+    return paths
+
+
 def folder_walk(path, ext='', save=False):
     """
     Iterate inside folder and find all files with specified extension
@@ -119,44 +144,13 @@ def colors_create(number_of_colors=1, color_map='Wistia', output=False):
         rgb = cmap(i)[:3]
         colors.append(matplotlib.colors.rgb2hex(rgb))
     if output:
-        for i,color in enumerate(colors):
+        for i, color in enumerate(colors):
             plt.scatter(i, 1, c=color, s=20)
     return colors
 
 
 # Structure
 # ---------
-
-def list_save(
-    input_list,
-    file_name='list',
-    file_postname='',
-    file_extension='csv',
-    delimiter=',',
-    replace=True,
-):
-    """
-    Method for saving list
-    """
-    if len(postname) > 0:
-        file_name = file_name + '_' + file_postname
-    file_path = os.path.join(OUTPUT_PATH, file_name + '.' + file_extension)
-    if os.path.exists(file_input):
-        print('file already exist.')
-        if replace:
-            print('overwriting ... ')
-            np.savetxt(file_path, input_list, delimiter=delimiter, fmt='%s')
-        else:
-            print('saving ... ')
-            file_path = os.path.join(
-                OUTPUT_PATH, file_name + '_new.' + file_extension
-            )
-            np.savetxt(file_path, input_list, delimiter=delimiter, fmt='%s')
-        print('done!')
-    else:
-        print('saving ... ')
-        np.savetxt(file_path, input_list, delimiter=delimiter, fmt='%s')
-        print('done!')
 
 
 def list_intersection(lst1, lst2):
@@ -166,7 +160,6 @@ def list_intersection(lst1, lst2):
     """
     temp = set(lst2)
     return [value for value in lst1 if value in temp]
-
 
 
 def dict_save(data, file='data', method='n', sort=False):
@@ -300,9 +293,6 @@ def label_amend(label_list, input_label, end=True):
     return label_list
 
 
-
-
-
 def rank(x, return_rank=False):
     """
     Rank items of a list from largest to smallest value
@@ -327,7 +317,7 @@ def rank(x, return_rank=False):
     # If input was 2D array change index to tuple (i,j) of matrix
     if isinstance(x, np.ndarray):
         temp = np.unravel_index(ranked.index, x.shape)
-        ranked.index = list(zip(temp[0],temp[1]))
+        ranked.index = list(zip(temp[0], temp[1]))
     # If the rank values are needed then return entire series
     if return_rank:
         return ranked

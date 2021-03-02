@@ -1,3 +1,6 @@
+# Temporal Network
+# A multiple-edge aggregated graph of time-labled edges (u,v,t)
+
 def temporal_bt_create(
     file_input=['db/bt.csv', 'db/uiuc.db'],
     file_output=[
