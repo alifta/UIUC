@@ -1,3 +1,16 @@
+# Data
+file
+image
+data
+db
+
+# Graph
+distance
+hits
+network
+remove
+temporal
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
