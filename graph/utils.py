@@ -8,6 +8,8 @@ import pickle
 import numpy as np
 import pandas as pd
 
+import random as rn
+
 import sqlite3
 
 import matplotlib.pyplot as plt
@@ -122,11 +124,11 @@ def folder_walk(path, ext='', save=False):
     return f
 
 
-def file_line_count(filename):
+def file_line_count(file_name):
     """
     Count number of lines in file
     """
-    return len(open(filename).readlines())
+    return len(open(file_name).readlines())
 
 
 # Colors
@@ -135,7 +137,7 @@ def file_line_count(filename):
 
 def colors_create(number_of_colors=1, color_map='Wistia', output=False):
     """
-    create a list of colors from the selected spectrum e.g. Wistia, cold or hot
+    Create a list of colors from the selected spectrum e.g. Wistia, cold or hot
     """
     colors = []
     cmap = cm.get_cmap(color_map, number_of_colors)
@@ -162,70 +164,70 @@ def list_intersection(lst1, lst2):
     return [value for value in lst1 if value in temp]
 
 
-def dict_save(data, file='data', method='n', sort=False):
+def dict_save(data, file_name='data', method='n', sort=False):
     """
-    Save input dictionary using different method:
-        n: numpy (npy) -> good for saving the data type
-        c: pandas (csv) -> good for looking at data after saving and sorting
-        j: json -> also good for looking at data (simple key type) and sorting
-        p: pickle -> should be fastest, good for simple data type
+    Save dict to file
+
+    Parameters
+    ----------
+    method : str
+        n -> numpy (.npy) -> suitable for saving any data type
+        c -> pandas (.csv) -> suitable for checking data after sorting and saving
+        j -> json (.json) -> also good for checking data
+        p -> pickle (.p) -> fastest and good for simple data types
     """
-    # NPY
+    # Npy
     if method == 'n':
-        filename = file + '.npy'
-        np.save(filename, data)
-    # CSV
+        file_name = file_name + '.npy'
+        np.save(file_name, data)
+    # Csv
     elif method == 'c':
-        filename = file + '.csv'
+        file_name = file_name + '.csv'
         if not sort:
             pd.DataFrame.from_dict(data, orient='index'
-                                   ).to_csv(filename, header=False)
+                                   ).to_csv(file_name, header=False)
         else:
             pd.DataFrame.from_dict(data, orient='index').sort_index(
                 axis=0
-            ).to_csv(filename, header=False)
-    # JSON
+            ).to_csv(file_name, header=False)
+    # Json
     elif method == 'j':
-        filename = file + '.json'
-        with open(filename, 'w') as fp:
+        file_name = file_name + '.json'
+        with open(file_name, 'w') as fp:
             if not sort:
                 json.dump(data, fp)
             else:
                 json.dump(data, fp, sort_keys=True, indent=4)
     # Pickle
     elif method == 'p':
-        filename = file + '.p'
-        with open(filename, 'wb') as fp:
+        file_name = file_name + '.p'
+        with open(file_name, 'wb') as fp:
             pickle.dump(data, fp, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def dict_load(file='data', method='n'):
+def dict_read(file_name='data', method='n'):
     """
-    Load input file into a dictionary using different method:
-        n: numpy (npy)
-        c: pandas (csv)
-        j: json
-        p: pickle
+    Read dict file
     """
     data = {}
-    # npy
+    # Npy
     if method == 'n':
-        filename = file + '.npy'
-        data = np.load(filename, allow_pickle='True').item()
-    # csv
+        file_name = file_name + '.npy'
+        data = np.load(file_name, allow_pickle='True').item()
+    # Csv
     elif method == 'c':
-        filename = file + '.csv'
-        data = pd.read_csv(filename, header=None,
+        file_name = file_name + '.csv'
+        data = pd.read_csv(file_name, header=None,
                            index_col=0).T.to_dict('records')[0]
-    # json
+    # Json
     elif method == 'j':
-        filename = file + '.json'
-        with open(filename, 'r') as fp:
+        file_name = file_name + '.json'
+        with open(file_name, 'r') as fp:
             data = json.load(fp)
-    # pickle
+    # Pickle
     elif method == 'p':
-        filename = file + '.p'
-        with open(filename, 'rb') as fp:
+        file_name = file_name + '.p'
+        with open(file_name, 'rb') as fp:
             data = pickle.load(fp)
     return data
 
@@ -348,11 +350,7 @@ def breakdown(lst, num):
     """
     Breakdown a list into chunks of sublist of size N
     """
-    # pprint(list(range(len(lst))))
-    # pprint(lst)
-
-    # Sort the list (high -> low)
-    # Rank the sorted list
+    # Sort the list (high -> low) then rank and finally sort based on rank
     ranks = pd.Series(lst).rank(method='dense',
                                 ascending=False).astype(int).sort_values()
     # Divide the ranks into chunk of desired size
@@ -375,48 +373,36 @@ def breakdown(lst, num):
     return bd
 
 
-# Figure
-# ------
-
-
-def fig_save(fig_id, tight_layout=True, fig_extension='png', resolution=300):
-    """
-    Method for saving figure
-    """
-    path = os.path.join(IMAGES_PATH, fig_id + '.' + fig_extension)
-    print('saving figure ...', fig_id)
-    if tight_layout:
-        plt.tight_layout()
-    plt.savefig(path, format=fig_extension, dpi=resolution)
-
-
 # Linear Algebra
 # --------------
 
 
-def top_n(arr, top_N=1, index=True):
+def top_n(arr, num=1, index=True):
     """
-    find top 'N' values of 1d numpy array or list
-    Return the index of top values (if index == True) or index and value as tuple
+    Find top N values of 1D numpy array or list
+    Return index of top values (if index == True) or (index,value) tuple
     """
-    idx = np.argsort(arr)[::-1][:top_N]
+    # Argsort would sort and return index
+    # Then we reverse index list
+    # Finally we pick the first N values
+    idx = np.argsort(arr)[::-1][:num]
     if index:
         return idx
-    else:
-        return [(e, arr[e]) for e in idx]
+    return [(e, arr[e]) for e in idx]
 
 
-def array_top_n(arr, top_N=1):
+def array_top_n(arr, num=1):
     """
-    find top 'N' values in 2d numpy array
+    find top N values in 2d numpy array
     """
     # (1)
-    # idx = np.argpartition(arr, arr.size - top_N, axis=None)[-top_N:][::-1]
+    # idx = np.argpartition(arr, arr.size - num, axis=None)[-num:][::-1]
     # result = np.column_stack(np.unravel_index(idx, arr.shape))
     # return [(e[0], e[1]) for e in result]
     # (2)
-    idx = (-arr).argsort(axis=None, kind='mergesort')
-    # idx = (-arr).argsort(axis=None, kind='mergesort')[:top_N]
+    # First negate the array, then use Argsort
+    # Finally convert index to (i,j) and unpack
+    idx = (-arr).argsort(axis=None, kind='mergesort')[:num]
     result = np.vstack(np.unravel_index(idx, arr.shape)).T
     return [(e[0], e[1]) for e in result]
 

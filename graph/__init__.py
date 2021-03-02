@@ -13,8 +13,6 @@ ROOT_PATH = os.path.dirname(PACK_PATH)
 DATA_PATH = os.path.join(ROOT_PATH, 'data')
 os.makedirs(DATA_PATH, exist_ok=True)
 
-print(DATA_PATH)
-
 # Database folder
 DB_PATH = os.path.join(ROOT_PATH, 'db')
 os.makedirs(DB_PATH, exist_ok=True)
