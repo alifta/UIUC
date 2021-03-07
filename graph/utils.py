@@ -14,6 +14,10 @@ import sqlite3
 
 import matplotlib.pyplot as plt
 from pylab import matplotlib, cm
+import seaborn as sns
+sns.set_style("ticks")
+
+from .io import *
 
 # Database
 # --------
@@ -75,7 +79,12 @@ def db_row_count(db, table, output=False):
 # ---------------
 
 
-def path_edit(file_names, file_label='', folder_name='', folder_label=''):
+def path_edit(
+    file_names: list,
+    folder_name='',
+    file_label='',
+    folder_label='',
+) -> list:
     """
     Edit paths of a list of file names as the following format
     {folder_name}/{folder_label}{file_name}_{file_label}.{extension}

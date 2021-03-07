@@ -1,3 +1,7 @@
+# Paths
+
+
+
 def dataset_db(file_input=['data'], file_output=['uiuc.db'], output=True):
     """
     Read log files of each user, detect user_hash based on the log names
