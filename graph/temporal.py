@@ -7,10 +7,14 @@ import networkx as nx
 from collections import Counter
 from collections import defaultdict
 from itertools import permutations
-from networkx.algorithms.core import onion_layers
 
+import math
+import timeit
 import powerlaw
 
+import matplotlib as mpl
+
+from sklearn.preprocessing import normalize
 from sklearn.preprocessing import QuantileTransformer
 
 from .io import *
@@ -1312,8 +1316,6 @@ def ton_bt_analyze(
     N = temporal.number_of_nodes()
     L = temporal.number_of_edges()
     T = len(times)
-    # N_new = graph.number_of_nodes()
-    # L_new = graph.number_of_edges()
 
     # Dictionary {time -> id of nodes in that time}
     time_nodes = {}
@@ -1490,7 +1492,7 @@ def ew(
             label_folder_in,
             label_file_in,
         )
-        N = file_line_count(
+        T = file_line_count(
             path_edit(
                 folder_in,
                 [file_in[2]],
@@ -1710,7 +1712,7 @@ def prob(
             label_folder_in,
             label_file_in,
         )
-        N = file_line_count(
+        T = file_line_count(
             path_edit(
                 folder_in,
                 [file_in[2]],
@@ -1795,102 +1797,86 @@ def prob(
         )
 
     # Edge-Probability dictionary {(u,v):p}
-    prob = ew.copy()
-    
-    # Initialize from edge weights i.e. prob has weight of horizontal edges
-    # Optionally, we can scale down weight of horizontal to range [0-0.5]
-    # Next we read the rest of edge weights e.g. crossed, teleport and loop
-    # Add all of them to prob dictionary and then normalize over nodes out-degree
+    # Start with edge weights dictionary
+    # Then multiply crossed weight epsilon to weight
+    # Scale down weight of horizontal to range [0-0.5], if larger than crossed
+    # Scaling formula
+    # X_scaled = (b - a) * ((X_scaled - min(X_scaled)) / (max(X_scaled) - min(X_scaled))) + a
+    # Which in for range [0-0.5] is as follows
+    # X_scaled = (0.5 * np.array(X_scaled)) + 0.5
 
-    # TODO
     for u, v, data in graph.edges(data=True):
-        # u & v have same parent => (u,v) is horizontal
-        time_delta = abs(v - u) // N
         parent_u = u % N
         parent_v = v % N
-        if parent_u != parent_v:  # Crossed
-            ew[(u, v)] = epsilon  # E.g. 1
-        else:  # Horizontal
-            if time_delta > 1:  # Teleport
-                # If _teleport = False during TN, these edges do not exist
-                ew[(u, v)] = gamma  # E.g. 0.0001
-            else:  # time_delta = 1
-                # Node v is node u at one timestamp after
-                ew[(u, v)] = omega
-
-    # X_scaled = (b - a) * ((X_scaled - min(X_scaled)) / (max(X_scaled) - min(X_scaled))) + a
-    # X_scaled = (0.5 * np.array(X_scaled)) + 0.5
+        time_delta = abs(v - u) // N
+        if parent_u != parent_v:
+            # Crossed
+            # By default epsilon = 1
+            ew[(u, v)] = epsilon * data['w']
+        # Leave the horizontals as they are ...
 
     for n in graph:
         parent_n = n % N
-        w_c = []  # Weights of crossed edges
-        w_h = []  # Weights of horizontal edges
-        for s in graph.successors(n):
+        degree_n = graph.out_degree(n)
+        w_c = {}  # Weights of crossed edges from n
+        w_h = {}  # Weights of horizontal edges from n
+        w_all = {}
+        for s in sorted(graph.successors(n)):  # N -> S
             parent_s = s % N
             if parent_n != parent_s:  # Crossed
                 # We read the weight of edge coming from aggregated network
-                w_c.append(graph[n][s]['w'])
-            else:  # Horizontal or teleport ...
-                w_h.append(prob[(n, s)])
+                w_c[(n, s)] = (ew[(n, s)])
+            else:  # Horizontal
+                w_h[(n, s)] = (ew[(n, s)])
         # If more than just one horizontal or crossed
+        # Max scale the weights
         if len(w_c) + len(w_h) > 1:
-            w_c_m = 0
-            if len(w_c) > 0:
-                w_c_m = max(w_c)
             w_h_m = 0
             if len(w_h) > 0:
-                w_h_m = max(w_h)
-            # Adjust weights of horizontal according to maximum of crossed
+                w_h_m = max(w_h.values())
+            w_c_m = 0
+            if len(w_c) > 0:
+                w_c_m = max(w_c.values())
+            else:
+                w_c_m = w_h_m
+            # Adjust large weights of horizontal
+            # We want horizontal be as important as crossed (no more)
             if w_h_m > w_c_m:
-                w_h = [item if item < w_c_m else w_c_m for item in w_h]
-            # Update probabilities
-            for s in graph.successors(n):
-                parent_s = s % N
-                if parent_n != parent_s:
-                    # Option 1
-                    # Leave them to original value from temporal network e.g. [0.5,1]
-                    # Most likely many are 0.5 which have 50/50 chance of transmission
-                    prob[(n, s)] = graph[n][s]['w']
-                    # Option 2
-                    # Scale up so maximum is 1.0 while rest are relatively scaled up too
-                    # prob[(n, s)] = graph[n][s]['w'] / w_c_m
-                else:
-                    if prob[(n, s)] < w_c_m:
-                        # Option 1
-                        # Leave it as it is
-                        # prob[(n, s)] = prob[(n, s)]
-                        pass
-                        # Option 2
-                        # Normalized it with maximum value
-                        # prob[(n, s)] /= w_c_m
-                    else:
-                        # Means horizontal weight is larger than max(crossed)
-                        # I.e. If exist a C(rossed) < 1 => exist H(orizontal) = 1
-                        # Option 1
-                        # Scale down 'H' to max('C') and end up being normalized to 1.0
-                        # prob[(n, s)] = 1.0
-                        # Option 2
+                for key, value in w_h.items():
+                    if value > w_c_m:
+                        # (1)
+                        w_h[key] = w_c_m
+                        # (2)
                         # Scale down to a random value [0.5,1]
-                        prob[(n, s)] = 0.5 * np.random.sample() + 0.5
+                        w_h[key] = 0.5 * np.random.sample() + 0.5
+            # Normalize node's probabilities
+            w_all = w_c.copy()
+            w_all.update(w_h)
+            # (1)
+            # factor = max([w_h_m, w_c_m])
+            # w_all = {k: v / factor for k, v in w_all.iteritems()}
+            # w_all = {k: v / (factor * degree_n) for k, v in w_all.iteritems()}
+            # (2)
+            factor = 1.0 / sum(w_all.itervalues())
+            w_all = {k: v * factor for k, v in w_all.iteritems()}
+            # Update probabilities
+            ew.update(w_all)
 
     if save_probs:
-        pd.DataFrame.from_dict(prob, orient='index').to_csv(file_output[1])
+        # pd.DataFrame.from_dict(ew, orient='index').to_csv(file_out[1])
+        pd.Series(ew).reset_index().to_csv(
+            file_out[1],
+            header=False,
+            index=False,
+        )
 
-    # Check the distribution of probabilities
     if output_probs:
-        ls = sorted(prob.items())
-        ls1, ls2 = zip(*ls)
-        plt.figure()
-        ax = sns.distplot(ls2, kde=True)
-        # ax = sns.distplot([i for i in ls2 if i != 1], kde=True)
-
-    if output_weights:
         for e, w in sorted(ew.items(), key=lambda x: x[0]):
             if e[0] % N == e[1] % N:  # H
                 if graph.in_degree(e[1]) == nid:
                     print('{}\t->\t{}\t{}'.format(e[0], e[1], w))
 
-    if plot_weights and version > 0:
+    if plot_probs:
         ls = sorted(ew.items())
         ls1, ls2 = zip(*ls)
         plt.figure()
@@ -1905,4 +1891,1949 @@ def prob(
         )
         ax.set(xlabel='Edge Probability', ylabel='Frequency')
 
-    return ew, prob
+    return prob
+
+
+def ew_read(
+    folder_in=NETWORK,
+    file_in=['bt_ton_weights.csv'],
+    label_folder_in='',
+    label_file_in='',
+):
+    """
+    Read edge weights of TON graph
+    """
+    # Edit paths
+    file_in = path_edit(
+        file_in,
+        folder_in,
+        label_file_in,
+        label_folder_in,
+    )
+    # Read edge weights file
+    ew = pd.read_csv(file_in[0], names=['u', 'v', 'w'])
+    # Fix index from tuple of (u,v)
+    ew.index = list(zip(ew.u, ew.v))
+    # Only keep the weights
+    ew = ew['w']
+    # Convert to dict
+    ew = ew.to_dict()
+    return ew
+
+
+def prob_read(
+    folder_in=NETWORK,
+    file_in=['bt_ton_probs.csv'],
+    label_folder_in='',
+    label_file_in='',
+):
+    """
+    Read edge probabilities of TON graph
+    """
+    # Edit paths
+    file_in = path_edit(
+        file_in,
+        folder_in,
+        label_file_in,
+        label_folder_in,
+    )
+    # Read edge weights file
+    prob = pd.read_csv(file_in[0], names=['u', 'v', 'w'])
+    # Fix index from tuple of (u,v)
+    prob.index = list(zip(ew.u, ew.v))
+    # Only keep the weights
+    prob = ew['w']
+    # Convert to dict
+    prob = ew.to_dict()
+    return prob
+
+
+# -------------
+# Temporal HITS
+# -------------
+
+
+def hits(
+    folder_in=NETWORK,
+    folder_out=HITS,
+    file_in=[
+        'bt_ton_network.gpickle',
+        'bt_temporal_nodes.csv',
+        'bt_temporal_times.csv',
+        'bt_ton_weights.csv',
+    ],
+    file_out=['a.csv', 'h.csv'],
+    label_folder_in='',
+    label_folder_out='',
+    label_file_in='',
+    label_file_out='',
+    graph=None,
+    nodes=None,
+    times=None,
+    ew=None,
+    nstart=None,
+    version=0,
+    sigma=0.85,
+    max_iter=100,
+    tol=1.0e-8,
+    norm_max=True,
+    norm_final_l1=True,
+    norm_final_l2=False,
+    norm_iter=False,
+    norm_degree=False,
+    norm_damping=False,
+    output=False,
+    plot=False,
+    save=True,
+):
+    """
+    Calculate HITS centrality of time-ordered network (TON)
+    
+    Parameters
+    ----------
+    version : int
+        (1) NetworkX
+            Normalize scores with SUM=1 Range [0,1]
+            1/max normalization in each iteration and final normalization at the end
+        (2) Book
+            Normalize scores with SUM=1 and DEVIATION=1 and range=[0,1]
+        (3) Paper (randomization or teleportation)
+            No regular normalization (v1 & v2), just in-out-normalization & damping/teleport/randomize
+        (4) NetX + teleport or PARTIAL randomization (NO in-out-normalization)
+        (5) Book + teleport or PARTIAL randomization (NO in-out-normalization)
+        (6) Paper + normalization of scores at each iteration
+        (7) Paper + l2 normalization of score at the end
+        (0) Default -> no change to parameters (norm_*) -> version 1 (NetX) + other manually set parameters
+    
+    Returns
+    -------
+    dict , dict
+        authority and hub scores as {node:score}
+    """
+    # Edit paths
+    file_out = path_edit(
+        file_out,
+        folder_out,
+        label_file_out,
+        label_folder_out,
+    )
+
+    # Finishing iteration
+    finish_iter = max_iter
+
+    h = {}  # Hub scores
+    a = {}  # Authority scores
+
+    # Read graph
+    if graph is None:
+        graph = ton_bt_read(
+            folder_in,
+            [file_in[0]],
+            label_folder_in,
+            label_file_in,
+        )
+
+    # Nodes
+    if nodes is None:
+        nodes = temporal_bt_nodes_read(
+            folder_in,
+            [file_in[1]],
+            label_folder_in,
+            label_file_in,
+        )
+        N = file_line_count(
+            path_edit(
+                folder_in,
+                [file_in[1]],
+                label_folder_in,
+                label_file_in,
+            )[0]
+        )
+    else:
+        N = len(nodes)
+
+    # Times
+    if times is None:
+        times = temporal_bt_times_read(
+            folder_in,
+            [file_in[2]],
+            label_folder_in,
+            label_file_in,
+        )
+        T = file_line_count(
+            path_edit(
+                folder_in,
+                [file_in[2]],
+                label_folder_in,
+                label_file_in,
+            )[0]
+        )
+    else:
+        T = len(times)
+
+    # Edge weight
+    if ew is None:
+        ew = ew_read(folder_in, [file_in[3]], label_folder_in, label_file_in)
+
+    # Damping-coefficient or normalization-parameter (default = 0.85)
+    # Which is same as sigma in supra-matrix model and applies to crossed edges only
+    # But here applies to all of the edges (crossed and horizontals ...)
+    damping = 1 - sigma  # Default = 0.15
+
+    # NetX
+    if version == 1:
+        norm_max = True  #
+        norm_final_l1 = True  #
+        norm_final_l2 = False
+        norm_iter = False
+        norm_degree = False
+        norm_damping = False
+
+    # Book
+    if version == 2:
+        norm_max = False
+        norm_final_l1 = False
+        norm_final_l2 = False
+        norm_iter = True  #
+        norm_degree = False
+        norm_damping = False
+
+    # Paper
+    if version == 3:
+        norm_max = False
+        norm_final_l1 = False
+        norm_final_l2 = False
+        norm_iter = False
+        norm_degree = True  #
+        norm_damping = True  #
+
+    # NetX + teleport
+    if version == 4:
+        norm_max = True  #
+        norm_final_l1 = True  #
+        norm_final_l2 = False
+        norm_iter = False
+        norm_degree = False
+        norm_damping = True  #
+
+    # Book + teleport
+    if version == 5:
+        norm_max = False
+        norm_final_l1 = False
+        norm_final_l2 = False
+        norm_iter = True  #
+        norm_degree = False
+        norm_damping = True  #
+
+    # Paper (degree normalization + teleport) + NetX
+    if version == 6:
+        norm_max = True  #
+        norm_final_l1 = True  #
+        norm_final_l2 = False
+        norm_iter = False
+        norm_degree = True  #
+        norm_damping = True  #
+
+    # Paper (degree normalization + teleport) + Book
+    if version == 7:
+        norm_max = False
+        norm_final_l1 = False
+        norm_final_l2 = False
+        norm_iter = True  #
+        norm_degree = True  #
+        norm_damping = True  #
+
+    # Paper + final norm L2
+    if version == 8:
+        norm_max = False
+        norm_final_l1 = False
+        norm_final_l2 = True  #
+        norm_iter = False
+        norm_degree = True  #
+        norm_damping = True  #
+
+    # Paper + final norm L2
+    if version == 9:
+        norm_max = True  #
+        norm_final_l1 = False
+        norm_final_l2 = False
+        norm_iter = False
+        norm_degree = True  #
+        norm_damping = True  #
+
+    # Initialize scores
+    if nstart is None:
+        h = dict.fromkeys(graph, 1.0 / graph.number_of_nodes())
+    else:
+        h = nstart
+        # Normalize starting vector
+        s = 1.0 / sum(h.values())
+        for k in h:
+            h[k] *= s
+
+    # Set start time
+    start_time = timeit.default_timer()
+
+    # Power iteration
+    if output: print(f'Calculating HITS (Version {version}) ...')
+    for i in range(max_iter):
+        # Print elapsed time
+        if i != 0 and i % 10 == 0:
+            elapsed = timeit.default_timer() - start_time
+            if output: print(f'Iteration {i} completed {elapsed:.0f} seconds')
+            # Reset start time
+            start_time = timeit.default_timer()
+
+        # Save the last calculated hub score
+        hlast = h
+
+        # Initialize scores for new iteration
+        h = dict.fromkeys(hlast.keys(), 0)
+        a = dict.fromkeys(hlast.keys(), 0)
+
+        # Authority
+        # ---------
+
+        # Left multiply a^T=hlast^T*G
+        # Authority of neighbors get value from hub of current node, influenced by weight of edge
+
+        # (1) default HITS -> no degree normalization
+        if not norm_degree:
+            for n in h:
+                for nbr in graph[n]:
+                    a[nbr] += hlast[n] * ew.get((n, nbr), 1)
+        # (2) degree normalization
+        else:
+            for n in h:
+                for nbr in graph[n]:
+                    # a[nbr] += hlast[n] / graph.in_degree(nbr) * ew.get((n, nbr), 1)
+                    a[nbr] += hlast[n] * ew.get((n, nbr),
+                                                1) / graph.in_degree(nbr)
+
+        # Paper
+        # Apply damping factor OR random-walk OR teleport
+        if norm_damping:
+            for n in a:
+                a[n] *= sigma
+                a[n] += damping
+
+        # Book
+        # Normalized authority scores over root of sum of squares after each calculation
+        # In this case we dont need final normalization
+        if norm_iter:
+            s = 1.0 / math.sqrt(sum([x**2 for x in a.values()]))
+            for n in a:
+                a[n] *= s
+
+        # Hub
+        # ---
+
+        # Multiply h=Ga
+        # Hub of current node get value from authority values of neighbor nodes, influenced by weight of edge
+
+        # (1) default HITS -> no degree normalization
+        if not norm_degree:
+            for n in h:
+                for nbr in graph[n]:
+                    h[n] += a[nbr] * ew.get((n, nbr), 1)
+        # (2) degree normalization
+        else:
+            for n in h:
+                for nbr in graph[n]:
+                    # h[n] += a[nbr] / graph.out_degree(n) * ew.get((n, nbr), 1)
+                    h[n] += a[nbr] * ew.get((n, nbr), 1) / graph.out_degree(n)
+
+        # Paper
+        # Apply damping factor OR randomize
+        if norm_damping:
+            for n in h:
+                h[n] *= sigma
+                h[n] += damping
+
+        # Book
+        # Normalized hub scores over root of sum of squares after each calculation
+        # In this case we dont need final normalization
+        if norm_iter:
+            s = 1.0 / math.sqrt(sum([x**2 for x in h.values()]))
+            for n in h:
+                h[n] *= s
+
+        # END of one iteration
+
+        # NetX
+        # Normalize scores over maximum
+        # Stopping score from getting really large
+        if norm_max:
+            a_max = 1.0 / max(a.values())
+            h_max = 1.0 / max(h.values())
+            for n in a:  # OR for n in h => both are same
+                a[n] *= a_max
+                h[n] *= h_max
+
+        # Check convergence
+        err = sum([abs(h[n] - hlast[n]) for n in h])
+        if err < tol:
+            finish_iter = i
+            if output: print(f'Successful after {finish_iter} iteration')
+            break
+
+    # Program did not meet treshhold for convergence
+    if finish_iter == max_iter:
+        if output: print(f'Not converged after {finish_iter} iterations')
+
+    # NetX
+    # Last normalization (L1) using sum
+    # Output in range (0-1) with sum-all = 1
+    if norm_final_l1:
+        a_sum = 1.0 / sum(list(a.values()))
+        h_sum = 1.0 / sum(list(h.values()))
+        for n in a:  # OR for n in h => both are same
+            a[n] *= a_sum
+            h[n] *= h_sum
+
+    # Last normalization (L2) using sum squred
+    if norm_final_l2 and not norm_final_l1:
+        a_sum = 1.0 / math.sqrt(sum([x**2 for x in a.values()]))
+        h_sum = 1.0 / math.sqrt(sum([x**2 for x in h.values()]))
+        for n in a:  # OR for n in h => both are same
+            a[n] *= a_sum
+            h[n] *= h_sum
+
+    # Save
+    if save:
+        pd.DataFrame.from_dict(a, orient='index'
+                               ).to_csv(file_out[0], header=False)
+        pd.DataFrame.from_dict(h, orient='index'
+                               ).to_csv(file_out[1], header=False)
+
+    # Plot distribution of scores
+    if plot:
+        # In most cases, A & H has same value so ploting one of them is enough
+        ls_a = sorted(a.values())  # ls_h = sorted(h.values())
+        ax = sns.displot(ls_a, kde=True, rug=True)
+        # BUT if they were different, we can create a dataframe and plot both together
+        # df = pd.DataFrame([a,h]).T
+        # df.columns = 'a h'.split()
+        # plt.figure()
+        # ax = sns.displot(data=df, kind='kde')
+
+    return a, h
+
+
+def hits_read(
+    folder_in=HITS,
+    file_in=['a.csv', 'h.csv'],
+    label_folder_in='',
+    label_file_in='',
+    output=False,
+    plot=False
+):
+    """
+    Read the result of HITS centrality scores from file
+    """
+    # Edit paths
+    file_in = path_edit(
+        file_in,
+        folder_in,
+        label_file_in,
+        label_folder_in,
+    )
+    # Read scores from file
+    if output: print('Reading HITS score ...')
+    a = pd.read_csv(file_in[0], names=['a'], index_col=0)
+    h = pd.read_csv(file_in[1], names=['h'], index_col=0)
+    # Take column a / h and convert to dict
+    a = a.to_dict()['a']
+    h = h.to_dict()['h']
+    # Plot
+    if plot: sns.displot(a.values(), kde=True, rug=True, legend=False)
+    return a, h
+
+
+def hits_conditional(
+    folder_in=[NETWORK, HITS],
+    folder_out=HITS,
+    file_in=[
+        'bt_temporal_nodes.csv',
+        'bt_temporal_times.csv',
+        'a,csv',
+        'h.csv',
+    ],
+    file_out=[
+        'a_array.csv',
+        'h_array.csv',
+        'a_avg_node.csv',
+        'a_avg_time.csv',
+        'h_avg_node.csv',
+        'h_avg_time.csv',
+        'a_norm_node.csv',
+        'a_norm_time.csv',
+        'h_norm_node.csv',
+        'h_norm_time.csv',
+    ],
+    label_folder_in='',
+    label_folder_out='',
+    label_file_in='',
+    label_file_out='',
+    a=None,
+    h=None,
+    N=None,
+    T=None,
+    removed=False,
+    save=True
+):
+    """
+    Create conditional centralities by normalizing
+    or averaging HITS scores over time (column) or node (row)
+    """
+    # Edit paths
+    file_out = path_edit(
+        file_out,
+        folder_out,
+        label_file_out,
+        label_folder_out,
+    )
+
+    # Nodes
+    if N is None:
+        N = file_line_count(
+            path_edit(
+                folder_in[0],
+                [file_in[0]],
+                label_folder_in,
+                label_file_in,
+            )[0]
+        )
+
+    # Times
+    if T is None:
+        T = file_line_count(
+            path_edit(
+                folder_in[0],
+                [file_in[1]],
+                label_folder_in,
+                label_file_in,
+            )[0]
+        )
+
+    # Read HITS scores
+    if a is None or h is None:
+        a, h = hits_read(
+            folder_in[1], file_in[2:4], label_folder_in, label_file_in
+        )
+
+    # Convert score dict to matrix (N x T)
+    A = np.zeros((N, T + 1))
+    H = np.zeros((N, T + 1))
+    # If graph is complete (no node has been removed)
+    if not removed:
+        a_sorted = [a[k] for k in sorted(a.keys())]
+        h_sorted = [h[k] for k in sorted(h.keys())]
+        A = np.reshape(a_sorted, (T + 1, N)).T
+        H = np.reshape(h_sorted, (T + 1, N)).T
+    else:  # Some of the nodes were removed
+        for node in a.keys():  # h.keys()
+            row = node % N  # node
+            col = node // N  # time
+            A[row, col] = a[node]
+            H[row, col] = h[node]
+
+    # Save A & H matrices
+    if save:
+        pd.DataFrame(A).to_csv(file_out[0], header=None, index=None)
+        pd.DataFrame(H).to_csv(file_out[1], header=None, index=None)
+
+    # Read A & H matrices
+    # A = pd.read_csv(file_input[0]).values
+    # H = pd.read_csv(file_input[1]).values
+
+    # Conditional Centralities
+    # ------------------------
+
+    # Average of score over time (column) or node (row)
+    A_avg_node = np.mean(A, axis=1)
+    A_avg_time = np.mean(A, axis=0)
+    H_avg_node = np.mean(H, axis=1)
+    H_avg_time = np.mean(H, axis=0)
+
+    # Normalized scores over time (column) or node (row)
+    # L1 is over sum(abs(x)) but scince all values are + L1 is over sum(x)
+    A_norm_node = normalize(A, axis=1, norm='l1')
+    A_norm_time = normalize(A, axis=0, norm='l1')
+    H_norm_node = normalize(H, axis=1, norm='l1')
+    H_norm_time = normalize(H, axis=0, norm='l1')
+    # OR
+    # A_norm_node = A / A.sum(axis=1, keepdims=True)
+    # A_norm_time = A / A.sum(axis=0, keepdims=True)
+    # H_norm_node = H / H.sum(axis=1, keepdims=True)
+    # H_norm_time = H / H.sum(axis=0, keepdims=True)
+
+    if save:
+        pd.DataFrame(A_avg_node).to_csv(file_out[2], header=None, index=None)
+        pd.DataFrame(A_avg_time).to_csv(file_out[3], header=None, index=None)
+        pd.DataFrame(H_avg_node).to_csv(file_out[4], header=None, index=None)
+        pd.DataFrame(H_avg_time).to_csv(file_out[5], header=None, index=None)
+        pd.DataFrame(A_norm_node).to_csv(file_out[6], header=None, index=None)
+        pd.DataFrame(A_norm_time).to_csv(file_out[7], header=None, index=None)
+        pd.DataFrame(H_norm_node).to_csv(file_out[8], header=None, index=None)
+        pd.DataFrame(H_norm_time).to_csv(file_out[9], header=None, index=None)
+
+
+def hits_conditional_read(
+    folder_in=HITS,
+    file_in=[
+        'a_array.csv',
+        'h_array.csv',
+        'a_avg_node.csv',
+        'a_avg_time.csv',
+        'h_avg_node.csv',
+        'h_avg_time.csv',
+        'a_norm_node.csv',
+        'a_norm_time.csv',
+        'h_norm_node.csv',
+        'h_norm_time.csv',
+    ],
+    label_folder_in='',
+    label_file_in='',
+    return_matrices=[0, 1],
+    return_all=False,
+    output=False
+):
+    """
+    Read conitional HITS centrality scores
+    
+    Parameters
+    ----------
+    return_matrices : list
+        [0,1] -> return matrices A & H only
+        range(0,10) -> return all conditional matrices
+    """
+    # Edit paths
+    file_in = path_edit(
+        file_in,
+        folder_in,
+        label_file_in,
+        label_folder_in,
+    )
+
+    # Return object names
+    rtn = {}
+    rtn_names = [
+        'A', 'H', 'a_avg_node', 'a_avg_time', 'h_avg_node', 'h_avg_time',
+        'a_norm_node', 'a_norm_time', 'h_norm_node', 'h_norm_time'
+    ]
+
+    # Default only return (0) A and (1) H matrices
+    if return_all:
+        return_matrices = list(range(0, 10))
+
+    # Read the files
+    if output: print('Readinging HITS conditional ...')
+    for i in return_matrices:
+        if output: print(f'{rtn_names[i]}')
+        temp = pd.read_csv(file_in[i], header=None, index_col=False).values
+        rtn[rtn_names[i]] = temp
+
+    return rtn
+
+
+def hits_analyze(
+    folder_in=[NETWORK, HITS],
+    folder_out=HITS,
+    file_in=[
+        'bt_ton_network.gpickle',
+        'bt_temporal_nodes.csv',
+        'bt_temporal_times.csv',
+        'bt_ton_weights.csv',
+        'a.csv',
+        'h.csv',
+        'a_array.csv',
+        'h_array.csv',
+        'a_avg_node.csv',
+        'a_avg_time.csv',
+        'h_avg_node.csv',
+        'h_avg_time.csv',
+        'a_norm_node.csv',
+        'a_norm_time.csv',
+        'h_norm_node.csv',
+        'h_norm_time.csv',
+    ],
+    file_out=[
+        'report.csv',
+        'top.csv',
+        'fig_a.pdf',
+        'fig_h.pdf',
+        'fig_a_report.pdf',
+        'fig_h_report.pdf',
+        'fig_a_corr.pdf',
+        'fig_h_corr.pdf',
+        'fig_mat.pdf',
+    ],
+    label_folder_in='',
+    label_folder_out='',
+    label_file_in='',
+    label_file_out='',
+    graph=None,
+    nodes=None,
+    times=None,
+    ew=None,
+    a=None,
+    h=None,
+    top=2,
+    section=4,
+    report_num=100
+):
+    """
+    Analyze HITS scores
+        Find top rank nodes using averaged-score over time
+        Highlight top nodes of TON model and other info such as parent, time, in-out-degree, in-out-weight ...
+    
+    Parameters
+    ----------
+        a : dict
+            authority score {node:score}
+        h : dict
+            hub score {node:score}
+        graph: NetX
+            time-ordered network (TON) model
+        times : list
+        nodes : list
+        ew : dict
+            edge weights {(u,v):w}
+    """
+    # Edit paths
+    file_out = path_edit(
+        file_out,
+        folder_out,
+        label_file_out,
+        label_folder_out,
+    )
+
+    # Graph
+    if graph is None:
+        graph = ton_bt_read(
+            folder_in[0],
+            [file_in[0]],
+            label_folder_in,
+            label_file_in,
+        )
+
+    # Nodes
+    if nodes is None:
+        nodes = temporal_bt_nodes_read(
+            folder_in[0],
+            [file_in[1]],
+            label_folder_in,
+            label_file_in,
+        )
+    N = len(nodes)
+
+    # Times
+    if times is None:
+        times = temporal_bt_times_read(
+            folder_in[0],
+            [file_in[2]],
+            label_folder_in,
+            label_file_in,
+        )
+    times = list(times)
+    T = len(times)
+
+    # Edge weight
+    if ew is None:
+        ew = ew_read(
+            folder_in[0],
+            [file_in[3]],
+            label_folder_in,
+            label_file_in,
+        )
+
+    # # Read HITS
+    if a is None or h is None:
+        a, h = hits_read(
+            folder_in[1],
+            file_in[4:6],
+            label_folder_in,
+            label_file_in,
+        )
+
+    times.insert(0, times[0])
+    t_first = times[0].strftime('%d %B\n%I %p')
+    t_last = times[-1].strftime('%d %B\n%I %p')
+    t_0 = times[0] - pd.Timedelta(1, unit='h')
+    t_day_idx = []
+    t_day_week = []
+    t_day_date = []
+    t_hour_12 = []
+    t_hour_17 = []
+    for i, time in enumerate(times):
+        if t_0.weekday() != time.weekday():
+            t_day_idx.append(i)
+            t_day_week.append(time.strftime('%a'))
+            t_day_date.append(time.strftime('%d'))
+            t_0 = time
+        if time.strftime('%H') == '12':
+            t_hour_12.append(i)
+        if time.strftime('%H') == '17':
+            t_hour_17.append(i)
+
+    # Conditional HTIS scores
+    cs = hits_conditional_read(
+        folder_in[1],
+        file_in[4:14],
+        label_folder_in,
+        label_file_in,
+        return_all=True,
+    )
+
+    # Authority Plot
+    # --------------
+
+    fig, ax = plt.subplots(figsize=(32, 20))
+    # (1)
+    # norm = mpl.colors.Normalize(vmin=0, vmax=1.0, clip=True)
+    # mapper = cm.ScalarMappable(norm=norm, cmap=cm.YlGnBu)
+    # (2)
+    # mapper = cm.get_cmap('YlGnBu', 10)  # 10 discrete colors
+    # force the first color entry to be grey
+    # (3)
+    cmap = plt.cm.tab10_r  # Define the colormap (tab10_r, YlGnBu, Wistia, ocean, cool)
+    # Extract all colors from the .jet map
+    cmaplist = [cmap(i) for i in range(cmap.N)]
+    # If tab10
+    cmaplist[0], cmaplist[2] = cmaplist[2], cmaplist[0]
+    # Force the first color entry to be grey
+    cmaplist[0] = (.8, .8, .8, 1.0)
+    # Create the new custom map
+    mapper = mpl.colors.LinearSegmentedColormap.from_list(
+        'my cmap', cmaplist, cmap.N
+    )
+    # define the bins and normalize
+    bounds = np.linspace(0, 1, 11)
+    norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+
+    # We can modify and add removed nodes or score == 0
+    # As red dots or something like that in the plot, but we need to
+    # Know if score == 0 is considered as removed or we get a removed_list
+    # Of nodes as an input of the hits_analyze method
+
+    A = cs['A']
+    X = list(range(1, T + 2))
+    for row in range(len(A)):
+        sc = ax.scatter(
+            X,
+            [row + 1] * (T + 1),
+            s=A[row] * 1000,
+            # s=[4*x**2 for x in A[row] * 10],
+            c=A[row],
+            # c=[mapper.to_rgba(x) for x in A[row]],
+            marker='|',
+            alpha=0.8,
+            # vmin=0,
+            # vmax=1.0,
+            norm=norm,  # or use vmin/vmax
+            # cmap=cm.YlGnBu,
+            cmap=mapper,
+        )
+
+    A_avg_node = cs['a_avg_node']
+    ax.scatter(
+        [T + 3] * N,
+        list(range(1, N + 1)),
+        s=A_avg_node * 100,
+        c=A_avg_node,
+        marker='s',
+        alpha=0.5,
+        cmap=cm.Wistia,
+    )
+
+    A_avg_node_sort = sorted(A_avg_node, reverse=True)
+    A_avg_node_rank = [A_avg_node_sort.index(e) for e in A_avg_node]
+    for x, y in zip([T + 5] * N, list(range(1, N + 1))):
+        ax.text(
+            x,
+            y,
+            str(A_avg_node_rank[y - 1] + 1),
+            color='black',
+            fontsize=10,
+        )
+
+    A_avg_time = cs['a_avg_time']
+    ax.scatter(
+        X,
+        [N + 1] * (T + 1),
+        s=A_avg_time * 100,
+        c=A_avg_time,
+        marker='s',
+        alpha=0.5,
+        cmap=cm.Wistia,
+    )
+
+    # Vertical date lines
+    ax.text(0, -0.2, 'Mon', rotation=90)
+    for i, point in enumerate(t_day_idx):
+        ax.axvline(
+            x=point,
+            ymin=0.03,
+            ymax=0.95,
+            linewidth=0.5,
+            color='green',
+            alpha=0.25
+        )
+        ax.text(point - 1, -0.2, t_day_week[i], rotation=90)
+    for i, point in enumerate(t_hour_12):
+        ax.axvline(
+            x=point,
+            ymin=0.03,
+            ymax=0.95,
+            linewidth=0.5,
+            color='red',
+            alpha=0.25
+        )
+        ax.text(point - 1, -0.2, 'Noon', rotation=90, fontsize=6)
+    for i, point in enumerate(t_hour_17):
+        ax.axvline(
+            x=point,
+            ymin=0.03,
+            ymax=0.95,
+            linewidth=0.5,
+            color='blue',
+            alpha=0.25
+        )
+        ax.text(point - 1, -0.2, '5 PM', rotation=90, fontsize=6)
+
+    # X axes
+    ax.set_xlabel('Time')
+    # ax.set_xticks(range(0, T + 1, 10))
+    # OR
+    ax.set_xticks([1] + t_day_idx + [T + 1])
+    ax.set_xticklabels([t_first] + t_day_date + [t_last])
+    # ax_label_first = ax.get_xticklabels()[0]
+    # ax_label_first.set_rotation(45)
+    # ax_label_first.set_ha('left')
+    # ax_label_last = ax.get_xticklabels()[-1]
+    # ax_label_last.set_rotation(45)
+    # ax_label_last.set_ha('left')
+
+    # Y axes
+    ax.set_ylabel('Node Index')
+    ax.set_yticks(range(1, N + 1))
+
+    # Figure labels
+    fig_title = 'Authority Score Over Time'
+    if len(label_file_out) > 0:
+        fig_title = fig_title + ' (' + label_file_out + ')'
+    ax.set_title(fig_title)
+
+    # Color bar
+    # fig.colorbar(mapper, ax=ax, shrink=0.5, pad=0.01)
+    fig.colorbar(sc, ax=ax, shrink=0.5, pad=0.01)
+
+    # Save figure
+    fig.savefig(file_out[2], dpi=300, bbox_inches='tight', transparent=True)
+    plt.close(fig)  # Close the figure window
+
+    # HUB
+    # ---
+
+    H = cs['H']
+    fig, ax = plt.subplots(figsize=(32, 20))
+    for row in range(len(H)):
+        ax.scatter(
+            X,
+            [row + 1] * (T + 1),
+            s=H[row] * 1000,
+            c=H[row],
+            marker='|',
+            alpha=0.8,
+            norm=norm,
+            cmap=mapper,
+        )
+
+    H_avg_node = cs['h_avg_node']
+    ax.scatter(
+        [T + 3] * N,
+        list(range(1, N + 1)),
+        s=H_avg_node * 100,
+        c=H_avg_node,
+        marker='s',
+        alpha=0.5,
+        cmap=cm.Wistia
+    )
+
+    H_avg_node_sort = sorted(H_avg_node, reverse=True)
+    H_avg_node_rank = [H_avg_node_sort.index(e) for e in H_avg_node]
+    for x, y in zip([T + 5] * N, list(range(1, N + 1))):
+        ax.text(
+            x,
+            y,
+            str(H_avg_node_rank[y - 1] + 1),
+            color='black',
+            fontsize=10,
+        )
+
+    H_avg_time = cs['h_avg_time']
+    ax.scatter(
+        X,
+        [N + 1] * (T + 1),
+        s=H_avg_time * 100,
+        c=H_avg_time,
+        marker='s',
+        alpha=0.5,
+        cmap=cm.Wistia,
+    )
+
+    ax.text(0, -0.2, 'Mon', rotation=90)
+    for i, point in enumerate(t_day_idx):
+        ax.axvline(
+            x=point,
+            ymin=0.03,
+            ymax=0.95,
+            linewidth=0.5,
+            color='green',
+            alpha=0.25
+        )
+        ax.text(point - 1, -0.2, t_day_week[i], rotation=90)
+    for i, point in enumerate(t_hour_12):
+        ax.axvline(
+            x=point,
+            ymin=0.03,
+            ymax=0.95,
+            linewidth=0.5,
+            color='red',
+            alpha=0.25
+        )
+        ax.text(point - 1, -0.2, 'Noon', rotation=90, fontsize=6)
+    for i, point in enumerate(t_hour_17):
+        ax.axvline(
+            x=point,
+            ymin=0.03,
+            ymax=0.95,
+            linewidth=0.5,
+            color='blue',
+            alpha=0.25
+        )
+        ax.text(point - 1, -0.2, '5 PM', rotation=90, fontsize=6)
+
+    ax.set_xlabel('Time')
+    ax.set_xticks([1] + t_day_idx + [T + 1])
+    ax.set_xticklabels([t_first] + t_day_date + [t_last])
+    ax.set_ylabel('Node Index')
+    ax.set_yticks(range(1, N + 1))
+    fig_title = 'Hub Score Over Time'
+    if len(label_file_out) > 0:
+        fig_title = fig_title + ' (' + label_file_out + ')'
+    ax.set_title(fig_title)
+    fig.colorbar(sc, ax=ax, shrink=0.5, pad=0.01)
+    fig.savefig(file_out[3], dpi=300, bbox_inches='tight', transparent=True)
+    plt.close(fig)
+
+    # REPORT
+    # -------
+    # Top node of temporal graph
+
+    # Check the correctness value of section and top
+    if top * section > N or top == -1:
+        # Analyze all nodes
+        top = N
+        section = 1
+
+    # Selected top nodes
+    selected_a = []
+    selected_h = []
+    # Rank nodes based on average score
+    idx_a, _ = list(zip(*rank(A_avg_node)))
+    idx_h, _ = list(zip(*rank(H_avg_node)))
+
+    # Select top 'n' nodes from each split
+    for sp in np.array_split(idx_a, section):
+        selected_a.extend(sp[:top])
+    for sp in np.array_split(idx_h, section):
+        selected_h.extend(sp[:top])
+
+    df_columns = []
+    df_labels = ['_a', '_h', '_id', '_od', '_iw', '_ow']
+    df_index = []
+
+    for node in selected_a:
+        df_index.extend([str(node) + e for e in df_labels])
+        col_in_d = []
+        col_out_d = []
+        col_in_w = []
+        col_out_w = []
+        for i in range(0, N * (T + 1), N):  # T + 1 iteration
+            n = node + i  # Give node index over different times
+            if graph.has_node(n):
+                col_in_d.append(graph.in_degree(n))
+                col_out_d.append(graph.out_degree(n))
+                sum_w = 0
+                for nbr in graph.predecessors(n):
+                    sum_w += ew.get((nbr, n), 1)
+                col_in_w.append(sum_w)
+                sum_w = 0
+                for nbr in graph.successors(n):
+                    sum_w += ew.get((n, nbr), 1)
+                col_out_w.append(sum_w)
+            else:  # The node has been removed from graph
+                col_in_d.append(0)
+                col_out_d.append(0)
+                col_in_w.append(0)
+                col_out_w.append(0)
+        df_columns.append(A[node])
+        df_columns.append(H[node])
+        df_columns.append(col_in_d)
+        df_columns.append(col_out_d)
+        df_columns.append(col_in_w)
+        df_columns.append(col_out_w)
+
+    for node in selected_h:
+        df_index.extend([str(node) + e for e in df_labels])
+        col_in_d = []
+        col_out_d = []
+        col_in_w = []
+        col_out_w = []
+        for i in range(0, N * (T + 1), N):
+            n = node + i
+            if graph.has_node(n):
+                col_in_d.append(graph.in_degree(n))
+                col_out_d.append(graph.out_degree(n))
+                sum_w = 0
+                for nbr in graph.predecessors(n):
+                    sum_w += ew.get((nbr, n), 1)
+                col_in_w.append(sum_w)
+                sum_w = 0
+                for nbr in graph.successors(n):
+                    sum_w += ew.get((n, nbr), 1)
+                col_out_w.append(sum_w)
+            else:
+                col_in_d.append(0)
+                col_out_d.append(0)
+                col_in_w.append(0)
+                col_out_w.append(0)
+        df_columns.append(A[node])
+        df_columns.append(H[node])
+        df_columns.append(col_in_d)
+        df_columns.append(col_out_d)
+        df_columns.append(col_in_w)
+        df_columns.append(col_out_w)
+
+    # Create and save dataframe of top nodes from each percentile (or split)
+    df = pd.DataFrame(df_columns, index=df_index, columns=list(range(T + 1))).T
+    df.to_csv(file_out[0], index=False)
+
+    # Plot the report
+    # df = df.t
+    df = pd.read_csv(file_out[0]).T
+    times = list(df.columns)
+    idx = df.index.values.tolist()
+    a_nodes, h_nodes = np.array_split(
+        [int(idx[i].split('_')[0]) for i in range(0, len(idx), 6)], 2
+    )
+
+    # Authority scores
+    fig, axs = plt.subplots(
+        len(a_nodes),
+        1,
+        figsize=(16, 12),
+        constrained_layout=True,
+    )
+    # cmap = plt.get_cmap('tab10')
+    for i in range(len(a_nodes)):
+        row_label = str(a_nodes[i]) + '_a'
+        row_label2 = str(a_nodes[i]) + '_id'  # id,od,iw,ow
+        legend_label = str(a_nodes[i])
+        # axs[i].scatter(
+        axs[i].plot(
+            times,
+            df.loc[row_label],
+            # (0)
+            c='black',
+            alpha=0.5,
+            # (1)
+            # c=[np.random.rand(3, )],
+            # (2)
+            # c=[cmap(i)],
+            # (1)
+            # linewidth=1,
+            # marker='o',
+            # markersize=6,
+            # (2)
+            # marker='.',
+            # label=legend_label
+        )
+        sc = axs[i].scatter(
+            times,
+            [0] * len(times),
+            # df.loc[row_label2],
+            s=df.loc[row_label2] * 100,
+            c=df.loc[row_label2],
+            marker='|',
+            alpha=1.0,
+            vmin=0,
+            # vmin=min(df.loc[row_label2]),
+            vmax=28,
+            # vmax=max(df.loc[row_label2]),
+            cmap=cm.Wistia,
+        )
+        axs[i].set_ylabel('Node ' + str(a_nodes[i]))
+    # fig.legend(loc='center left', bbox_to_anchor=(1.03, 0.5))
+    fig.text(0.5, 1.02, 'Temporal HITS', ha='center')
+    fig.text(0.5, -0.02, 'Time', ha='center')
+    fig.text(-0.02, 0.5, 'Authority Score', va='center', rotation='vertical')
+    fig.colorbar(sc, ax=ax, shrink=0.5, pad=0.01)
+    fig.savefig(file_out[4], dpi=300, bbox_inches='tight', transparent=True)
+    plt.close(fig)
+
+    # Hub scores
+    fig, axs = plt.subplots(
+        len(h_nodes),
+        1,
+        figsize=(16, 12),
+        constrained_layout=True,
+    )
+    for i in range(len(h_nodes)):
+        row_label = str(h_nodes[i]) + '_h'
+        row_label2 = str(h_nodes[i]) + '_od'  # id,od,iw,ow
+        axs[i].plot(
+            times,
+            df.loc[row_label],
+            c='black',
+            alpha=0.5,
+        )
+        sc = axs[i].scatter(
+            times,
+            [0] * len(times),
+            s=df.loc[row_label2] * 100,
+            c=df.loc[row_label2],
+            marker='|',
+            alpha=1.0,
+            vmin=0,
+            vmax=28,
+            cmap=cm.Wistia,
+        )
+        axs[i].set_ylabel('Node ' + str(a_nodes[i]))
+    fig.text(0.5, 1.02, 'Temporal HITS', ha='center')
+    fig.text(0.5, -0.02, 'Time', ha='center')
+    fig.text(-0.02, 0.5, 'Hub Score', va='center', rotation='vertical')
+    fig.colorbar(sc, ax=ax, shrink=0.5, pad=0.01)
+    fig.savefig(file_out[5], dpi=300, bbox_inches='tight', transparent=True)
+    plt.close(fig)
+
+    # TOP
+    # ---
+    # Top nodes of TON graph
+
+    if report_num > N * (T + 1) or report_num == -1:
+        # Analyze all nodes
+        report_num = N * (T + 1)
+
+    # Top rank TON graph nodes based on HITS score
+    A_top = rank(a, return_rank=True)[:report_num]
+    H_top = rank(h, return_rank=True)[:report_num]
+
+    df_index = []
+    col_r = []  # Rank
+    col_c = []  # Category i.e. A or H
+    col_n = []  # Node id
+    col_a = []
+    col_h = []
+    col_p = []  # Parent
+    col_t = []  # Time
+    col_in_d = []
+    col_out_d = []
+    col_in_w = []
+    col_out_w = []
+
+    for n, r in A_top.items():
+        df_index.append('a_' + str(n))
+        col_n.append(n)
+        col_r.append(r)
+        col_c.append('a')
+        col_a.append(a[n])
+        col_h.append(h[n])
+        col_p.append(n % N)
+        col_t.append(n // N)
+        col_in_d.append(graph.in_degree(n))
+        col_out_d.append(graph.out_degree(n))
+        sum_w = 0
+        for nbr in graph.predecessors(n):
+            sum_w += ew.get((nbr, n), 1)
+        col_in_w.append(sum_w)
+        sum_w = 0
+        for nbr in graph.successors(n):
+            sum_w += ew.get((n, nbr), 1)
+        col_out_w.append(sum_w)
+
+    for n, r in H_top.items():
+        df_index.append('h_' + str(n))
+        col_n.append(n)
+        col_r.append(r)
+        col_c.append('h')
+        col_a.append(a[n])
+        col_h.append(h[n])
+        col_p.append(n % N)
+        col_t.append(n // N)
+        col_in_d.append(graph.in_degree(n))
+        col_out_d.append(graph.out_degree(n))
+        sum_w = 0
+        for nbr in graph.predecessors(n):
+            sum_w += ew.get((nbr, n), 1)
+        col_in_w.append(sum_w)
+        sum_w = 0
+        for nbr in graph.successors(n):
+            sum_w += ew.get((n, nbr), 1)
+        col_out_w.append(sum_w)
+
+    df = pd.DataFrame(
+        {
+            'r': col_r,
+            'n': col_n,
+            'a': col_a,
+            'h': col_h,
+            'p': col_p,
+            't': col_t,
+            'id': col_in_d,
+            'od': col_out_d,
+            'iw': col_in_w,
+            'ow': col_out_w,
+            'c': col_c
+        },
+        index=df_index
+    )
+
+    # Save top node analysis
+    df.to_csv(file_out[1], index=False)
+
+    # Correlation between in/out-degree and HITS scores
+    fig, axs = plt.subplots(2, 2, figsize=(16, 16), constrained_layout=True)
+    axs[0, 0].scatter(df[df.c == 'a'].id, df[df.c == 'a'].a)
+    axs[0, 0].set_xlabel('In-degree')
+    axs[0, 0].set_ylabel('Authority Score')
+    axs[0, 1].scatter(df[df.c == 'a'].od, df[df.c == 'a'].a)
+    axs[0, 1].set_xlabel('Out-degree')
+    axs[0, 1].set_ylabel('Authority Score')
+    axs[1, 0].scatter(df[df.c == 'a'].iw, df[df.c == 'a'].a)
+    axs[1, 0].set_xlabel('In-weight')
+    axs[1, 0].set_ylabel('Authority Score')
+    axs[1, 1].scatter(df[df.c == 'a'].ow, df[df.c == 'a'].a)
+    axs[1, 1].set_xlabel('Out-weight')
+    axs[1, 1].set_ylabel('Authority Score')
+    fig.savefig(file_out[6], dpi=300, bbox_inches='tight', transparent=True)
+    plt.close(fig)
+
+    fig, axs = plt.subplots(2, 2, figsize=(16, 16), constrained_layout=True)
+    axs[0, 0].scatter(df[df.c == 'h'].id, df[df.c == 'h'].h)
+    axs[0, 0].set_xlabel('In-degree')
+    axs[0, 0].set_ylabel('Hub Score')
+    axs[0, 1].scatter(df[df.c == 'h'].od, df[df.c == 'h'].h)
+    axs[0, 1].set_xlabel('Out-degree')
+    axs[0, 1].set_ylabel('Hub Score')
+    axs[1, 0].scatter(df[df.c == 'h'].iw, df[df.c == 'h'].h)
+    axs[1, 0].set_xlabel('In-weight')
+    axs[1, 0].set_ylabel('Hub Score')
+    axs[1, 1].scatter(df[df.c == 'h'].ow, df[df.c == 'h'].h)
+    axs[1, 1].set_xlabel('Out-weight')
+    axs[1, 1].set_ylabel('Hub Score')
+    fig.savefig(file_out[7], dpi=300, bbox_inches='tight', transparent=True)
+    plt.close(fig)
+
+    # Correlation matrix
+    corr = df.corr()  # method='pearson',
+    # corr = df.corr(method ='kendall')
+    # corr = df.corr(method ='spearman')
+    fig, ax = plt.subplots(figsize=(9, 8))
+    sns.heatmap(corr, ax=ax, cmap='YlGnBu', linewidths=0.1)
+    fig.savefig(file_out[8], dpi=300, bbox_inches='tight', transparent=True)
+    plt.close(fig)
+
+
+def hits_group(versions=[]):
+    if len(versions) < 1:
+        versions = [str(i) for i in range(1, 10)]  # 1 ... 9
+    for v in versions:
+        pass
+        # hits
+        # conditional
+        # analyze
+
+
+# ------------
+# Node Removal
+# ------------
+
+# TODO
+
+
+def hits_remove(
+    folder_in=[NETWORK, HITS],
+    folder_out=NETWORK,
+    file_in=[
+        'bt_ton_network.gpickle',
+        'bt_temporal_nodes.csv',
+        'bt_temporal_times.csv',
+        'bt_ton_weights.csv',
+        'a.csv',
+        'h.csv',
+    ],
+    file_out=[
+        'bt_ton_network.gpickle',
+        'bt_temporal_network.gpickle',
+        'bt_temporal_times.csv',
+        'bt_temporal_nodes.csv',
+        'bt_ton_weights.csv',
+        'bt_ton_probs.csv',
+        'a.csv',
+        'h.csv',
+        'a_array.csv',
+        'h_array.csv',
+        'a_avg_node.csv',
+        'a_avg_time.csv',
+        'h_avg_node.csv',
+        'h_avg_time.csv',
+        'a_norm_node.csv',
+        'a_norm_time.csv',
+        'h_norm_node.csv',
+        'h_norm_time.csv',
+        'report.csv',
+        'top.csv',
+        'fig_a.pdf',
+        'fig_h.pdf',
+        'fig_a_report.pdf',
+        'fig_h_report.pdf',
+        'fig_a_corr.pdf',
+        'fig_h_corr.pdf',
+        'fig_mat.pdf',
+        'remove.csv',
+    ],
+    label_folder_in='',
+    label_folder_out='remove',
+    label_file_in='',
+    label_file_out='',
+    graph=None,
+    times=None,
+    nodes=None,
+    ew=None,
+    a=None,
+    h=None,
+    epoch=10,  # How many times repead the node removal action
+    remove=0.5,  # Stop if X ratio of nodes were removed (even if not reached X epoch)
+    step=10,  # E.g. Remove 10 % or 10 nodes at each epoch    
+    strategy_a='a',  # 'a' or 'h' = authority or hub    
+    strategy_b='t',  # 't' or 's' = temporal or static
+    strategy_c='r',  # 'r' or 'n' = ratio or number
+    strategy_d=1,  # Score-based or random approach
+    time_window=(5, 12),  # Remove high rank nodes between 5 pm - 12 am
+    actions=[0, 2],
+    output=True,
+    plot_times=False,
+    save_networks=True,
+    return_graphs=True,
+    return_scores=True,
+):
+    """
+    Strategy
+        A: Score
+            a = authority
+            h = hub
+        B: Network
+            s = static
+            t = temporal
+        C: Size
+            n = number number of nodes to be removed (default = 1)
+            r = ratio of nodes to be removed (default = 1 %)
+        D: method
+            0) randomly
+            1) centrality-based (i.e. temporal HITS)
+            2) high rank nodes at specific time window
+            3) degree-based (TODO in future)
+    Actions
+        0) Convert TON to TEMPORAL model and save it
+        1) Convert TEMPORAL model to STATIC model
+        2) Calculate temporal HITS on modified network
+            A) Calculate new Edge-Weghts and save
+            B) Calculate HITS
+            C) Analyze HITS
+        ---
+        TODO
+        2) intersection similarity
+        3) centrality robustness
+        4) influence maximization
+        5) network diameter (90 threshhold)
+        6) Number and size of gient connected components (CC)
+            - Is it still one big CC (time = 1 -> T) or it is broken into pices
+            - How many CC's or time windows (e.g. start-t2, t2-t10, t10-end)
+        7) Average pair-wise (tempora and topological=hop) distance
+        8) Network reachability
+        9) Epidemic treshhold (spread of information or disease)
+        10) Shanon diversity
+    """
+    # Edit paths
+    file_out = path_edit(
+        file_out,
+        folder_out,
+        label_file_out,
+        label_folder_out,
+    )
+
+    # Graph
+    if graph is None:
+        graph = ton_bt_read(
+            folder_in[0],
+            [file_in[0]],
+            label_folder_in,
+            label_file_in,
+        )
+
+    # Nodes
+    if nodes is None:
+        nodes = temporal_bt_nodes_read(
+            folder_in[0],
+            [file_in[1]],
+            label_folder_in,
+            label_file_in,
+        )
+    N = len(nodes)
+
+    # Times
+    if times is None:
+        times = temporal_bt_times_read(
+            folder_in[0],
+            [file_in[2]],
+            label_folder_in,
+            label_file_in,
+        )
+    times = list(times)
+    T = len(times)
+
+    # Edge weight
+    if ew is None:
+        ew = ew_read(
+            folder_in[0],
+            [file_in[3]],
+            label_folder_in,
+            label_file_in,
+        )
+
+    # # Read HITS
+    if a is None or h is None:
+        a, h = hits_read(
+            folder_in[1],
+            file_in[4:6],
+            label_folder_in,
+            label_file_in,
+        )
+
+    # Number of nodes and edges of TON graph
+    N_ton = graph.number_of_nodes()
+    M_ton = graph.number_of_edges()
+
+    # Size of nodes and timestamp of temporal network after node removal
+    # Will be updated later but better to have it as global variable
+    N_tem = 0
+    T_tem = 0
+    M = 0
+
+    # Print network info before any node removal
+    if output: print(nx.info(graph), '\n')
+
+    # Create list of scores by sorting the key of dictionary
+    a_values, h_values = [], []
+    for k in sorted(a.keys(), reverse=False):  # Ascending
+        # Score of node 1 to the last node id number
+        a_values.append(a[k])
+        h_values.append(h[k])
+
+    # Create A and H matrices by iterating through sorted list of node
+    A = np.reshape(a_values, (T + 1, N)).T
+    H = np.reshape(h_values, (T + 1, N)).T
+
+    # Create average score of nodes and timestamps
+    A_avg_node = A.sum(axis=1) / (T + 1)
+    A_avg_time = A.sum(axis=0) / N
+    H_avg_node = H.sum(axis=1) / (T + 1)
+    H_avg_time = H.sum(axis=0) / N
+
+    # Time Analysis
+    t_first = times[0].strftime('%d %B\n%I %p')
+    t_last = times[-1].strftime('%d %B\n%I %p')
+    t_0 = times[0] - pd.Timedelta(1, unit='h')
+
+    # Distribution of timestamps over days and weeks of the month
+    # Also finding time index of timestamp that hour change to 7am, 12p, 5pm, and 12am
+    t_day_idx = []
+    t_day_week = []
+    t_day_date = []  # 7 am (or earliest time of the day)
+    t_hour_12 = []
+    t_hour_17 = []
+    # Save index of each timestamp belong to what time windows of the day
+    # [ [7 am - noon], [12 pm - 5 pm], [5 pm - 12 am] ]
+    for i, time in enumerate(times):
+        if t_0.weekday() != time.weekday():  # When day of the week changes
+            t_day_idx.append(
+                i
+            )  # Index of the first hour of each day (expected to be 7 am)
+            t_day_week.append(time.strftime('%a'))  # Monday ...
+            t_day_date.append(time.strftime('%d'))  # 1st, 2nd, ..., 31
+            t_0 = time
+        if time.strftime('%H') == '12':
+            t_hour_12.append(i)
+        if time.strftime('%H') == '17':
+            t_hour_17.append(i)
+
+    # Adding first timestamp same as timestamp 1
+    # Just because of temporal network model requires this method
+    times.insert(0, times[0])  # Make times list to size T + 1
+
+    # Best hour and day in terms of highest authority average score
+    days_a = defaultdict(list)
+    hours_a = defaultdict(list)
+    for i, score in enumerate(A_avg_time):
+        days_a[times[i].weekday()].append(score)
+        hours_a[times[i].hour].append(score)
+    days_a_sum = {k: sum(v) / len(v) for k, v in days_a.items()}
+    hours_a_sum = {k: sum(v) / len(v) for k, v in hours_a.items()}
+
+    # Day-Hour matrix score
+    # 7 days and 18 hours [7 am ... 11 pm] , missing 6 hours of [12 am ... 6 am]
+    day_hour_a = np.zeros((7, 18))
+    day_hour_a_count = np.zeros((7, 18))
+    for i, t in enumerate(times):
+        day_hour_a[t.dayofweek][t.hour - 6] += A_avg_time[i]
+        day_hour_a_count[t.dayofweek][t.hour - 6] += 1
+    # To avoid ZeroDivisionError, replace all 0 with 1
+    # Still average produce 0 because observe/count (0/1=0)
+    day_hour_a_count_new = day_hour_a_count.copy()
+    day_hour_a_count_new[day_hour_a_count == 0] = 1
+    day_hour_a_avg = np.divide(day_hour_a, day_hour_a_count_new)[:, 1:]
+
+    # Best hour and day in terms of highest hub average score
+    days_h = defaultdict(list)
+    hours_h = defaultdict(list)
+    for i, score in enumerate(H_avg_time):
+        days_h[times[i].weekday()].append(score)
+        hours_h[times[i].hour].append(score)
+    days_h_sum = {k: sum(v) / len(v) for k, v in days_h.items()}
+    hours_h_sum = {k: sum(v) / len(v) for k, v in hours_h.items()}
+
+    # Day-Hour matrix score
+    day_hour_h = np.zeros((7, 18))
+    day_hour_h_count = np.zeros((7, 18))
+    for i, t in enumerate(times):
+        day_hour_h[t.dayofweek][t.hour - 6] += H_avg_time[i]
+        day_hour_h_count[t.dayofweek][t.hour - 6] += 1
+
+    day_hour_h_count_new = day_hour_h_count.copy()
+    day_hour_h_count_new[day_hour_h_count == 0] = 1
+    day_hour_h_avg = np.divide(day_hour_h, day_hour_h_count_new)[:, 1:]
+
+    if plot_times:
+        ax = plt.axes()
+        sns.heatmap(
+            day_hour_a_count[:, 1:],
+            linewidth=0.5,
+            cmap='YlGnBu',
+            xticklabels=list(range(7, 24)),
+            yticklabels=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+            ax=ax
+        )
+        ax.set_title('Day and hour frequency of timestamps')
+        plt.show()
+        # ---
+        ax = plt.axes()
+        sns.heatmap(
+            day_hour_a_avg,
+            linewidth=0.5,
+            cmap='YlGnBu',
+            xticklabels=list(range(7, 24)),
+            yticklabels=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        )
+        ax.set_title('Average authority score over days and hours')
+        plt.show()
+        # ---
+        ax = plt.axes()
+        sns.heatmap(
+            day_hour_h_avg,
+            linewidth=0.5,
+            cmap='YlGnBu',
+            xticklabels=list(range(7, 24)),
+            yticklabels=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        )
+        ax.set_title('Average hub score over days and hours')
+        plt.show()
+
+    epoch_0 = 0  # How many times the algorimth is looped
+    remove_0 = 0  # ratio of removed nodes
+
+    # Number of nodes or ratio
+    if strategy_c == 'n':
+        # Step should be an integer number
+        # print(f'Removing {step} nodes or equevelant of {step/N_ton*100:.2f} % of all the nodes at every epoch\n')
+        pass  # Do nothing, if not printing
+    elif strategy_c == 'r':
+        # Step should be a float ratio [0.0  ... 1.0]
+        # print(f'Removing of {step*100:.2f} % of all the nodes or equevelant of {int(N_ton*step)} nodes at every epoch\n')
+        # Edit number of removing nodes based on input ratio
+        step = int(N_ton * step)
+
+    # Iterative over chunk of X nodes with high HITS scores
+    bd = []
+    tops = []
+    if strategy_a == 'a':
+        bd = breakdown(a_values, step)
+        tops = iter(bd)
+    elif strategy_a == 'h':
+        bd = breakdown(h_values, step)
+        tops = iter(bd)
+
+    # If wants to return the calculated graphs at the end
+    graphs = {}  # Dict of temporal graphs
+    tons = {}  # Dict of TON model graphs
+    auts = {}  # Dict of authority scores
+    hubs = {}  # Dict of hub scores
+
+    # Add initial graphs and scores here
+    temporal = temporal_bt_read()
+    M = temporal.number_of_edges()
+
+    if return_graphs:
+        tons[epoch_0] = graph
+        graphs[epoch_0] = temporal
+    if return_scores:
+        auts[epoch_0] = a
+        hubs[epoch_0] = h
+
+    epoch_0 += 1  # 1
+    selected_nodes = []
+    removed_total = []
+    # Keep removing nodes until one of the conditions happen
+    # while epoch_0 <= epoch and remove_0 <= remove:
+    for _ in range(1, len(bd)):
+        if epoch_0 > epoch or remove_0 >= remove:
+            break
+        else:
+            if output: print(f'EPOCH {epoch_0}:\n---------')
+
+        # Create saving folders and file names
+        file_output_new = []
+        if not len(label_output_folder) > 0:  # Empty
+            label_output_folder_temp = strategy_a + '-' + strategy_c + '-' + str(
+                strategy_d
+            ) + '-' + str(epoch_0)
+            file_output_new = label_amend(
+                file_output, label_output_folder_temp, end=False
+            )
+        else:
+            file_output_new = file_output
+
+        # Empty list of node to be removed ...
+        selected_nodes.clear()
+
+        # Method 0
+        if strategy_d == 0:
+            if output:
+                print(
+                    'Removing', step, 'nodes out of', graph.number_of_nodes(),
+                    'selected randomly ...\n'
+                )
+
+            # Pick a set of nodes uniformy random
+            # np.random.seed(0)
+            selected_nodes = list(
+                np.random.choice(graph.nodes, size=step, replace=False)
+            )
+            removed_total.extend(selected_nodes)
+            np.savetxt(
+                file_output_new[27],
+                selected_nodes,
+                delimiter=',',
+                fmt='%s',
+            )
+            # if output: print(selected_nodes)
+
+        # Method 1
+        elif strategy_d == 1:
+            if output:
+                print(
+                    'Removing', step, 'nodes out of', graph.number_of_nodes(),
+                    'selected based on temporal HITS scores ...\n'
+                )
+
+            # Select top ranked HITS score nodes
+            selected_nodes = next(tops)
+            removed_total.extend(selected_nodes)
+            np.savetxt(
+                file_output_new[27],
+                selected_nodes,
+                delimiter=',',
+                fmt='%s',
+            )
+            # if output: print(selected_nodes)
+
+        # Method 3 TODO
+        elif strategy_d == 2:
+            if output:
+                print(
+                    'Removing', step, 'nodes out of', graph.number_of_nodes(),
+                    'selected based on average HITS scores and in time window of ',
+                    time_window, ' ...\n'
+                )
+
+            # Sort best node with highest average score
+            ids_a = A_avg_node.argsort()[::-1]
+            ids_h = H_avg_node.argsort()[::-1]
+            # Select based on desired ratio
+            selected_a = ids_a[epoch * step:(epoch + 1) * step]
+            selected_h = ids_h[epoch * step:(epoch + 1) * step]
+            # Filter for desired time window
+            selected_noodes = []
+            selected_times = list(range(T + 1))
+            for n in selected_a:
+                selected_noodes.extend([N * t + n for t in selected_times])
+            removed_total.extend(selected_nodes)
+
+        # Remove selected nodes
+        graph.remove_nodes_from(selected_nodes)
+        graph.name = 'Time-ordered Network (' + str(epoch_0) + ')'
+
+        # If returning
+        if return_graphs: tons[epoch_0] = graph
+
+        # Save
+        if save_networks: nx.write_gpickle(graph, file_output_new[0])
+
+        # Print network statistics after node removal
+        if output:
+            print(nx.info(graph))
+            print(
+                f'Removed {N_ton - graph.number_of_nodes()} nodes out of {N_ton}'
+                f' or {(N_ton - graph.number_of_nodes()) / N_ton * 100:.2f} % and {M_ton - graph.number_of_edges()}'
+                f' edges out of {M_ton} or {(M_ton - graph.number_of_edges()) / M_ton * 100:.2f} %'
+            )
+            print()
+
+        # ACTIONS
+        # -------
+
+        # Convert TON to TEMPORAL then save
+        if 0 in actions:
+            temporal = tn_bt_to_temporal(
+                temporal=graph,
+                file_output=file_output_new[1:4],  # 1...3
+                label_graph_name=str(epoch_0)
+            )
+            # update number of nodes and timestamp in temporal graph (not TON)
+            temporal_T = line_count(file_output_new[2])
+            N_tem = line_count(file_output_new[3])
+            if output:
+                # print(nx.info(temporal))
+                print(
+                    f'Removed {N - N_tem} nodes out of {N}'
+                    f' or {(N - N_tem) / N*100:.2f} % and {M - temporal.number_of_edges()}'
+                    f' edges out of {M} or {(M - temporal.number_of_edges()) / M * 100:.2f} %'
+                )
+                print()
+            # If returning
+            if return_graphs: graphs[epoch_0] = temporal
+
+        # Convert TEMPORAL to STATIC then save
+        if 1 in actions:
+            pass
+
+        # Calculate HITS on new TON graph
+        if 2 in actions:
+            # Edge-Weight
+            ew = ew_create(
+                file_input=[
+                    file_output_new[0],  # graph
+                    'network/bt_temporal_nodes.csv',  # original nodes
+                    'network/bt_temporal_times.csv',  # original times
+                ],
+                file_output=[file_output_new[4]],  # edge-weights
+                # graph=graph, # after removal
+                # number_of_nodes=N,  # original
+                # number_of_times=T,  # original
+                version=3,  # 0
+                omega=1,
+                gamma=0.0001,
+                epsilon=1,
+                distance=0.1,  # 1
+                alpha=0.5,
+                save_weights=True,
+                output_weights=False,
+                plot_weights=False
+            )
+            # HITS
+            a_n, h_n = hits(
+                file_input=[
+                    'network/bt_tn_full_network.gpickle',  # not needed
+                    file_output_new[0],  # graph after removal
+                    'network/bt_temporal_times.csv',  # original nodes
+                    'network/bt_temporal_nodes.csv',  # original times
+                    file_output_new[4],  # edge weights after removal
+                ],
+                file_output=file_output_new[6:8],  # 6...7
+                label_output='',
+                # graph=graph,  # after removal
+                # times=times,  # original times list
+                # nodes=nodes,  # original nodes list
+                # ew=ew,  # after removal
+                version=3,  # 0
+                sigma=0.85,
+                max_iter=100,
+                tol=1.0e-8,
+                norm_max=True,
+                norm_final_l1=True,
+                norm_final_l2=False,
+                norm_iter=False,
+                norm_degree=False,
+                norm_damping=False,
+                output=False,
+                plot=False,
+                save=True
+            )
+            auts[epoch_0] = a_n
+            hubs[epoch_0] = h_n
+            # Conditional HITS scores
+            hits_conditional(
+                file_input=file_output_new[6:8],
+                file_output=file_output_new[8:18],  # 8..17
+                label_input='',
+                label_output='',
+                # a=a_n,
+                # h=h_n,
+                # N=N,
+                # T=T,
+                removed=True,
+                save=True
+            )
+            # Analyze HITS
+            hits_analyze(
+                file_input=[
+                    'network/bt_temporal_nodes.csv',
+                    'network/bt_temporal_times.csv',
+                ],
+                file_net=[file_output_new[0]],  # graph after removal
+                file_ew=[file_output_new[4]],  # edge weigths after removal
+                file_hits=file_output_new[6:18],  # 6...17
+                file_output=file_output_new[18:20],  # 18...19
+                file_image=file_output_new[20:27],  # 20...26
+                label_input='',
+                label_hits='',
+                label_output='',
+                label_image='',
+                # graph=graph,  # graph updated
+                # times=times,  # original times
+                # nodes=nodes,  # original nodes
+                # ew=ew,  # edge weights updated
+                # a=a_n,  # new authority scores
+                # h=h_n,  # new hub scores
+                top=2,
+                section=4,
+                report_num=100
+            )
+
+        # Update epoch and ...
+        epoch_0 += 1
+        remove_0 = (N_ton - graph.number_of_nodes()) / N_ton
+
+    return graphs
