@@ -355,13 +355,21 @@ assert rank(
 ) == [4, 5, 3, 6, 7, 8, 2, 1, 0, 11, 10, 9]
 
 
-def breakdown(lst, num):
+def breakdown(x, num, full=False):
     """
     Breakdown a list into chunks of sublist of size N
     """
-    # Sort the list (high -> low) then rank and finally sort based on rank
-    ranks = pd.Series(lst).rank(method='dense',
-                                ascending=False).astype(int).sort_values()
+    # Full -> size of chun is the entire list
+    if full:
+        num = len(x)
+    # Sort the list / dict using (high -> low) values
+    if isinstance(x, dict):
+        ranks = pd.Series(x, index=sorted(
+            x.keys()
+        )).rank(method='dense', ascending=False).astype(int).sort_values()
+    else:
+        ranks = pd.Series(x).rank(method='dense',
+                                  ascending=False).astype(int).sort_values()
     # Divide the ranks into chunk of desired size
     chunks = [list(ranks.iloc[i:i + num]) for i in range(0, len(ranks), num)]
     # Dictionary of {rank : indices}
@@ -372,13 +380,13 @@ def breakdown(lst, num):
     # Create a new chunk, but index of high ranks to low ranks
     bd = []
     for chunk in chunks:
-        lst_temp = []
+        x_temp = []
         for rank in chunk:
             # Picl a random index from the selected rank
             idx = rn.sample(rank_idx[rank], 1)[0]
-            lst_temp.append(idx)
+            x_temp.append(idx)
             rank_idx.get(rank).remove(idx)
-        bd.append(lst_temp)
+        bd.append(x_temp)
     return bd
 
 
@@ -425,3 +433,36 @@ def matrix_print(M, out_int=True):
             print(*element.astype(int))
         else:
             print(*element)
+
+
+def isim(lst1, lst2):
+    '''
+    Calculate intercention similarity of two lists
+    '''
+    # check if both list have the same size
+    if len(lst1) < len(lst2):
+        lst2 = lst2[:len(lst1)]
+    else:
+        lst1 = lst1[:len(lst2)]
+
+    isim = []
+    for i in range(1, len(lst1) + 1):
+        set1 = set(lst1[:i])
+        set2 = set(lst2[:i])
+        set_dif = set1 ^ set2  # symmetric difference
+        isim.append(len(set_dif) / (2 * i))
+
+    isim_norm = []
+    for i in range(len(isim)):
+        isim_norm.append(sum(isim[:i + 1]) / (i + 1))
+
+    return isim_norm
+
+
+def isim_tie(ls1, ls2):
+    """
+    Function to calculate intersection similarity for the lists
+    where we may have many nodes rank requal (ties) so sorting nodes
+    based on the ranks has many noise. Therefore, we slightly change the algorithm ...
+    """
+    pass
