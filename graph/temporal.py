@@ -1128,6 +1128,7 @@ def ton_bt_to_temporal(
     label_folder_out='',
     label_file_in='',
     label_file_out='',
+    label_graph='',
     temporal=None,
     trans_remove=True,
     output_network=True,
@@ -1148,8 +1149,8 @@ def ton_bt_to_temporal(
 
     # Create empty network
     graph = nx.MultiDiGraph()
-    graph_name = 'Temoral Network'
-    if len(label_file_out) > 0: graph_name = graph_name + ' ' + label_file_out
+    graph_name = 'Temporal Network'
+    if len(label_graph) > 0: graph_name = graph_name + ' ' + label_graph
     graph.name = graph_name
 
     # Read temporal networks from file
@@ -1382,7 +1383,7 @@ def ew(
     gamma=0.0001,
     distance=1,
     alpha=0.5,
-    save_weights=False,
+    save_weights=True,
     output_weights=False,
     plot_weights=False
 ):
@@ -3261,8 +3262,6 @@ def hits_group(versions=[]):
 # Node Removal
 # ------------
 
-# TODO
-
 
 def hits_remove(
     folder_in=[NETWORK, HITS],
@@ -3276,10 +3275,11 @@ def hits_remove(
         'h.csv',
     ],
     file_out=[
+        'remove.csv',
         'bt_ton_network.gpickle',
         'bt_temporal_network.gpickle',
-        'bt_temporal_times.csv',
         'bt_temporal_nodes.csv',
+        'bt_temporal_times.csv',
         'bt_ton_weights.csv',
         'bt_ton_probs.csv',
         'a.csv',
@@ -3303,7 +3303,6 @@ def hits_remove(
         'fig_a_corr.pdf',
         'fig_h_corr.pdf',
         'fig_mat.pdf',
-        'remove.csv',
     ],
     label_folder_in='',
     label_folder_out='remove',
@@ -3345,7 +3344,7 @@ def hits_remove(
             0) randomly
             1) centrality-based (i.e. temporal HITS)
             2) high rank nodes at specific time window
-            3) degree-based (TODO in future)
+            3) degree-based (in future ...)
     Actions
         0) Convert TON to TEMPORAL model and save it
         1) Convert TEMPORAL model to STATIC model
@@ -3354,7 +3353,7 @@ def hits_remove(
             B) Calculate HITS
             C) Analyze HITS
         ---
-        TODO
+        Future methods:
         2) intersection similarity
         3) centrality robustness
         4) influence maximization
@@ -3368,12 +3367,7 @@ def hits_remove(
         10) Shanon diversity
     """
     # Edit paths
-    file_out = path_edit(
-        file_out,
-        folder_out,
-        label_file_out,
-        label_folder_out,
-    )
+    # file_out = path_edit(file_out,folder_out,label_file_out,label_folder_out)
 
     # Graph
     if graph is None:
@@ -3405,6 +3399,9 @@ def hits_remove(
     times = list(times)
     T = len(times)
 
+    # Keep times in separate object
+    times_original = times.copy()
+
     # Edge weight
     if ew is None:
         ew = ew_read(
@@ -3431,7 +3428,7 @@ def hits_remove(
     # Will be updated later but better to have it as global variable
     N_tem = 0
     T_tem = 0
-    M = 0
+    M_tem = 0
 
     # Print network info before any node removal
     if output: print(nx.info(graph), '\n')
@@ -3448,10 +3445,10 @@ def hits_remove(
     H = np.reshape(h_values, (T + 1, N)).T
 
     # Create average score of nodes and timestamps
-    A_avg_node = A.sum(axis=1) / (T + 1)
-    A_avg_time = A.sum(axis=0) / N
-    H_avg_node = H.sum(axis=1) / (T + 1)
-    H_avg_time = H.sum(axis=0) / N
+    A_avg_node = np.mean(A, axis=1)
+    A_avg_time = np.mean(A, axis=0)
+    H_avg_node = np.mean(H, axis=1)
+    H_avg_time = np.mean(H, axis=0)
 
     # Time Analysis
     t_first = times[0].strftime('%d %B\n%I %p')
@@ -3483,6 +3480,7 @@ def hits_remove(
     # Adding first timestamp same as timestamp 1
     # Just because of temporal network model requires this method
     times.insert(0, times[0])  # Make times list to size T + 1
+    # NOTE Times list and its size is changed here ...
 
     # Best hour and day in terms of highest authority average score
     days_a = defaultdict(list)
@@ -3556,7 +3554,9 @@ def hits_remove(
             linewidth=0.5,
             cmap='YlGnBu',
             xticklabels=list(range(7, 24)),
-            yticklabels=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+            yticklabels=[
+                'Mon', 'Tue', 'Wedfile_out_new', 'Thu', 'Fri', 'Sat', 'Sun'
+            ]
         )
         ax.set_title('Average hub score over days and hours')
         plt.show()
@@ -3586,18 +3586,18 @@ def hits_remove(
         tops = iter(bd)
 
     # If wants to return the calculated graphs at the end
-    graphs = {}  # Dict of temporal graphs
+    temporals = {}  # Dict of temporal graphs
     tons = {}  # Dict of TON model graphs
     auts = {}  # Dict of authority scores
     hubs = {}  # Dict of hub scores
 
     # Add initial graphs and scores here
     temporal = temporal_bt_read()
-    M = temporal.number_of_edges()
+    M_tem = temporal.number_of_edges()
 
     if return_graphs:
         tons[epoch_0] = graph
-        graphs[epoch_0] = temporal
+        temporals[epoch_0] = temporal
     if return_scores:
         auts[epoch_0] = a
         hubs[epoch_0] = h
@@ -3614,16 +3614,13 @@ def hits_remove(
             if output: print(f'EPOCH {epoch_0}:\n---------')
 
         # Create saving folders and file names
-        file_output_new = []
-        if not len(label_output_folder) > 0:  # Empty
-            label_output_folder_temp = strategy_a + '-' + strategy_c + '-' + str(
-                strategy_d
-            ) + '-' + str(epoch_0)
-            file_output_new = label_amend(
-                file_output, label_output_folder_temp, end=False
-            )
-        else:
-            file_output_new = file_output
+        label_epoch = label_folder_out + '/' + str(epoch_0)
+        file_out_new = path_edit(
+            file_out,
+            folder_out,
+            label_file_out,
+            label_epoch,
+        )
 
         # Empty list of node to be removed ...
         selected_nodes.clear()
@@ -3643,7 +3640,7 @@ def hits_remove(
             )
             removed_total.extend(selected_nodes)
             np.savetxt(
-                file_output_new[27],
+                file_out_new[0],
                 selected_nodes,
                 delimiter=',',
                 fmt='%s',
@@ -3662,7 +3659,7 @@ def hits_remove(
             selected_nodes = next(tops)
             removed_total.extend(selected_nodes)
             np.savetxt(
-                file_output_new[27],
+                file_out_new[0],
                 selected_nodes,
                 delimiter=',',
                 fmt='%s',
@@ -3699,7 +3696,7 @@ def hits_remove(
         if return_graphs: tons[epoch_0] = graph
 
         # Save
-        if save_networks: nx.write_gpickle(graph, file_output_new[0])
+        if save_networks: nx.write_gpickle(graph, file_out_new[1])
 
         # Print network statistics after node removal
         if output:
@@ -3716,16 +3713,15 @@ def hits_remove(
 
         # Convert TON to TEMPORAL then save
         if 0 in actions:
-            temporal = tn_bt_to_temporal(
+            temporal = ton_bt_to_temporal(
                 temporal=graph,
-                file_output=file_output_new[1:4],  # 1...3
-                label_graph_name=str(epoch_0)
+                label_folder_out=label_epoch,
+                label_graph=str(epoch_0)
             )
-            # update number of nodes and timestamp in temporal graph (not TON)
-            temporal_T = line_count(file_output_new[2])
-            N_tem = line_count(file_output_new[3])
+            # Update number of nodes and timestamp in temporal graph (not TON)
+            N_tem = file_line_count(file_out_new[3])
+            T_tem = file_line_count(file_out_new[4])
             if output:
-                # print(nx.info(temporal))
                 print(
                     f'Removed {N - N_tem} nodes out of {N}'
                     f' or {(N - N_tem) / N*100:.2f} % and {M - temporal.number_of_edges()}'
@@ -3733,7 +3729,7 @@ def hits_remove(
                 )
                 print()
             # If returning
-            if return_graphs: graphs[epoch_0] = temporal
+            if return_graphs: temporals[epoch_0] = temporal
 
         # Convert TEMPORAL to STATIC then save
         if 1 in actions:
@@ -3742,91 +3738,54 @@ def hits_remove(
         # Calculate HITS on new TON graph
         if 2 in actions:
             # Edge-Weight
-            ew = ew_create(
-                file_input=[
-                    file_output_new[0],  # graph
-                    'network/bt_temporal_nodes.csv',  # original nodes
-                    'network/bt_temporal_times.csv',  # original times
-                ],
-                file_output=[file_output_new[4]],  # edge-weights
-                # graph=graph, # after removal
-                # number_of_nodes=N,  # original
-                # number_of_times=T,  # original
-                version=3,  # 0
+            ew = ew(
+                label_folder_in=label_epoch,
+                label_folder_out=label_epoch,
+                graph=graph,  # updated
+                nodes=nodes,  # original
+                times=times_original,  # original
+                version=3,
                 omega=1,
-                gamma=0.0001,
                 epsilon=1,
-                distance=0.1,  # 1
+                gamma=0.0001,
+                distance=0.1,
                 alpha=0.5,
-                save_weights=True,
-                output_weights=False,
-                plot_weights=False
             )
             # HITS
-            a_n, h_n = hits(
-                file_input=[
-                    'network/bt_tn_full_network.gpickle',  # not needed
-                    file_output_new[0],  # graph after removal
-                    'network/bt_temporal_times.csv',  # original nodes
-                    'network/bt_temporal_nodes.csv',  # original times
-                    file_output_new[4],  # edge weights after removal
-                ],
-                file_output=file_output_new[6:8],  # 6...7
-                label_output='',
-                # graph=graph,  # after removal
-                # times=times,  # original times list
-                # nodes=nodes,  # original nodes list
-                # ew=ew,  # after removal
-                version=3,  # 0
+            a_new, h_new = hits(
+                label_folder_in=label_epoch,
+                label_folder_out=label_epoch,
+                graph=graph,  # updated
+                nodes=nodes,  # original
+                times=times_original,  # original
+                ew=ew,  # updated
+                version=3,
                 sigma=0.85,
                 max_iter=100,
-                tol=1.0e-8,
-                norm_max=True,
-                norm_final_l1=True,
-                norm_final_l2=False,
-                norm_iter=False,
-                norm_degree=False,
-                norm_damping=False,
-                output=False,
-                plot=False,
-                save=True
             )
-            auts[epoch_0] = a_n
-            hubs[epoch_0] = h_n
+            auts[epoch_0] = a_new
+            hubs[epoch_0] = h_new
             # Conditional HITS scores
             hits_conditional(
-                file_input=file_output_new[6:8],
-                file_output=file_output_new[8:18],  # 8..17
-                label_input='',
-                label_output='',
-                # a=a_n,
-                # h=h_n,
-                # N=N,
-                # T=T,
+                label_folder_in=label_epoch,
+                label_folder_out=label_epoch,
+                graph=graph,  # updated
+                a=a_new,
+                h=h_new,
+                N=N,
+                T=T,
                 removed=True,
-                save=True
             )
             # Analyze HITS
             hits_analyze(
-                file_input=[
-                    'network/bt_temporal_nodes.csv',
-                    'network/bt_temporal_times.csv',
-                ],
-                file_net=[file_output_new[0]],  # graph after removal
-                file_ew=[file_output_new[4]],  # edge weigths after removal
-                file_hits=file_output_new[6:18],  # 6...17
-                file_output=file_output_new[18:20],  # 18...19
-                file_image=file_output_new[20:27],  # 20...26
-                label_input='',
-                label_hits='',
-                label_output='',
-                label_image='',
-                # graph=graph,  # graph updated
-                # times=times,  # original times
-                # nodes=nodes,  # original nodes
-                # ew=ew,  # edge weights updated
-                # a=a_n,  # new authority scores
-                # h=h_n,  # new hub scores
+                label_folder_in=label_epoch,
+                label_folder_out=label_epoch,
+                graph=graph,  # updated
+                nodes=nodes,  # original
+                times=times_original,  # original
+                ew=ew,  # updated
+                a=a_new,  # updated
+                h=h_new,  # updated
                 top=2,
                 section=4,
                 report_num=100
@@ -3836,4 +3795,11 @@ def hits_remove(
         epoch_0 += 1
         remove_0 = (N_ton - graph.number_of_nodes()) / N_ton
 
-    return graphs
+    return temporals
+
+# -----------------------
+# Intersection Similarity
+# -----------------------
+
+
+
