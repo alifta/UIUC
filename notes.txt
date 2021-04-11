@@ -1,0 +1,2 @@
+Temporal network
+For now, we only normalize link weight over all of weights, and not focused on time interval of interactions or the end points edges. However, later we can modify this and normalize on the both of time dimesion and node-pair of edges. Thus, the decision of not normalizing in the temporal network creation gives us freedom of doing any link weight normalization in later steps such as Time-Ordered network creation step.

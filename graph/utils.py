@@ -304,9 +304,9 @@ def label_amend(label_list, input_label, end=True):
     return label_list
 
 
-def rank(x, return_rank=False):
+def rank(x, return_rank=False, method='dense'):
     """
-    Rank items of a list from largest to smallest value
+    Rank items of a container from largest to smallest value
     and return a list of [(index,value,rank)]
     """
     # Input is list
@@ -324,7 +324,7 @@ def rank(x, return_rank=False):
     if isinstance(x, dict):
         s = pd.Series(x, index=sorted(x.keys()))
     # Rank the data
-    ranked = s.rank(method='dense', ascending=False).astype(int).sort_values()
+    ranked = s.rank(method=method, ascending=False).astype(int).sort_values()
     # If input was 2D array change index to tuple (i,j) of matrix
     if isinstance(x, np.ndarray):
         temp = np.unravel_index(ranked.index, x.shape)
