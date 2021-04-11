@@ -1,7 +1,14 @@
-import os
+# import os
+
+from .data import *
+from .io import *
+from .network import *
+from .snippet import *
+from .spread import *
+from .temporal import *
+from .utils import *
+
 
 # Import folder path as constants
-from .io import *
-
-# Create the needed folders
+# Then create the needed folders
 folder_create()

@@ -1,23 +1,24 @@
 import os
 
- # Package folder
-PACKAGE = os.getcwd()
 # Project folder
-ROOT = os.path.dirname(PACKAGE)
+ROOT = os.path.dirname(os.getcwd())
+# Package folder
+PACKAGE = os.path.join(ROOT, 'UIUC')
 # Data folder
-DATA = os.path.join(ROOT, 'data')
+DATA = os.path.join(PACKAGE, 'data')
 # Dataset folder
-DATASET = os.path.join(ROOT, DATA, 'dataset')
+DATASET = os.path.join(PACKAGE, DATA, 'dataset')
 # Database folder
-DB = os.path.join(ROOT, DATA, 'db')
+DB = os.path.join(PACKAGE, DATA, 'db')
 # Extra files folder
-FILE = os.path.join(ROOT, DATA, 'file')
+FILE = os.path.join(PACKAGE, DATA, 'file')
 # Image folder
-IMAGE = os.path.join(ROOT, DATA, 'image')
+IMAGE = os.path.join(PACKAGE, DATA, 'image')
 # Graph folder
-NETWORK = os.path.join(ROOT, DATA, 'network')
+NETWORK = os.path.join(PACKAGE, DATA, 'network')
 # HITS score folder
-HITS = os.path.join(ROOT, DATA, 'hits')
+HITS = os.path.join(PACKAGE, DATA, 'hits')
+
 
 def folder_create():
     """

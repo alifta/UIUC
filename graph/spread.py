@@ -1,3 +1,5 @@
+# TODO: I need to add influecne maximization to this class
+
 import numpy as np
 import networkx as nx
 

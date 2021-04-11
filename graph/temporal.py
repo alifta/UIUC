@@ -7,12 +7,15 @@ import networkx as nx
 from collections import Counter
 from collections import defaultdict
 from itertools import permutations
+import scipy.stats as stats
 
 import math
 import timeit
 import powerlaw
 
 import matplotlib as mpl
+import seaborn as sns
+sns.set_style('ticks')
 
 from sklearn.preprocessing import normalize
 from sklearn.preprocessing import QuantileTransformer
@@ -78,7 +81,7 @@ def temporal_bt(
     )[0]
     file_out = path_edit(
         file_out,
-        folder_out,
+        folder_out[0],
         label_file_out,
         label_folder_out,
     )
@@ -191,13 +194,15 @@ def temporal_bt(
     # Plot the distribution of original weights
     if plot_weights:
         plt.figure()
-        ax = sns.distplot(
-            X, bins=max(X), kde=True, hist_kws={
-                "linewidth": 15,
-                'alpha': 1
-            }
+        ax = sns.histplot(
+            data_graph['w'],
+            bins=max(data_graph['w']),
+            kde=True,
+            # stat='density',
         )
-        ax.set(xlabel='Original Edge Weight', ylabel='Frequency')
+        plt.ylabel('Frequency')
+        plt.xlabel('Original Edge Weight')
+        plt.show()
 
     # Max-Min Normalizer (produce many zeros)
     # transformer = MinMaxScaler()
@@ -236,16 +241,14 @@ def temporal_bt(
     # Plot the distribution of scaled weights
     if plot_weights:
         plt.figure()
-        ax = sns.distplot(
+        ax = sns.histplot(
             X_scaled,
-            bins=max(X),
             kde=True,
-            hist_kws={
-                "linewidth": 15,
-                'alpha': 1
-            }
+            # stat='density',
         )
-        ax.set(xlabel='Scaled Edge Weight', ylabel='Frequency')
+        plt.ylabel('Frequency')
+        plt.xlabel('Scaled Edge Weight')
+        plt.show()
 
     # Save back scaled weights to DF
     data_graph['w'] = X_scaled
@@ -395,10 +398,9 @@ def temporal_bt_read(
 
     # Read from file
     if os.path.exists(file_in[0]):
-        if output: print('Reading temporal network ...')
         graph = nx.read_gpickle(file_in[0])
     else:
-        if output: print('Temporal network file was not found')
+        print('File not found')
         return None
 
     # Print graph statistics
@@ -425,14 +427,13 @@ def temporal_bt_times_read(
 
     # Read from file
     if os.path.exists(file_in[0]):
-        if output: print('Reading times ...')
         times = pd.read_csv(
             file_in[0], index_col=False, header=None, names=['times']
         ).iloc[:, 0]
         # Change type (str -> datetime)
         times = times.astype('datetime64[ns]')
     else:
-        if output: print('Times file was not found')
+        print('File not found')
         return None
 
     return times
@@ -456,12 +457,11 @@ def temporal_bt_nodes_read(
 
     # Read from file
     if os.path.exists(file_in[0]):
-        if output: print('Reading nodes ...')
         nodes = pd.read_csv(
             file_in[0], index_col=False, header=None, names=['nodes']
         ).iloc[:, 0]
     else:
-        if output: print('Nodes file was not found')
+        print('File not found')
         return None
 
     return nodes
@@ -484,9 +484,9 @@ def static_bt(
     temporal=None,
     tmies=None,
     undirected=True,
-    output_network=False,
-    save_network_csv=False,
-    save_network_file=False,
+    output_network=True,
+    save_network_csv=True,
+    save_network_file=True,
 ):
     """
     Convert input temporal network to the (aggregated) static network
@@ -584,7 +584,6 @@ def static_bt_read(
 
     # Read the network from file
     if os.path.exists(file_in[0]):
-        if output: print('Reading static network ...')
         graph = nx.read_gpickle(file_in[0])
 
     # Network statistics
@@ -642,7 +641,7 @@ def ton_bt(
     teleport=False,
     loop=False,
     trans=True,
-    output_network=False,
+    output_network=True,
     save_network_db=False,
     save_network_csv=True,
     save_network_file=True
@@ -851,10 +850,9 @@ def ton_bt_full(
         'bt_temporal_times.csv',
     ],
     file_out=[
-        'bt_tonf_network.gpickle',
-        'bt_tonf_edgelist.csv',
-        'bt_tonf_delta.csv',
-        'bt_tonf_weights.csv',
+        'bt_ton_network.gpickle',
+        'bt_ton_edgelist.csv',
+        'bt_ton_delta.csv',
     ],
     label_folder_in='',
     label_folder_out='',
@@ -866,9 +864,9 @@ def ton_bt_full(
     trans=True,
     teleport=False,
     loop=False,
-    output_delta=False,
-    output_network=False,
-    save_delta=False,
+    output_delta=True,
+    output_network=True,
+    save_delta=True,
     save_network_csv=True,
     save_network_file=True
 ):
@@ -1169,15 +1167,8 @@ def ton_bt_to_temporal(
         label_folder_in,
         label_file_in,
     )
-    N = file_line_count(
-        path_edit(
-            folder_in,
-            [file_in[1]],
-            label_folder_in,
-            label_file_in,
-        )[0]
-    )
-    # N = len(nodes)
+    # N = file_line_count(path_edit(folder_in,[file_in[1]],label_folder_in,label_file_in,)[0])
+    N = len(nodes)
 
     # Timestamp
     times = temporal_bt_times_read(
@@ -1186,15 +1177,8 @@ def ton_bt_to_temporal(
         label_folder_in,
         label_file_in,
     )
-    T = file_line_count(
-        path_edit(
-            folder_in,
-            [file_in[2]],
-            label_folder_in,
-            label_file_in,
-        )[0]
-    )
-    # T = len(times)
+    # T = file_line_count(path_edit(folder_in,[file_in[2]],label_folder_in,label_file_in,)[0])
+    T = len(times)
 
     # Calculate current timestamp list from graph
     # In case, in node removal caused loosing some timestamp comparing to original
@@ -1282,13 +1266,14 @@ def ton_bt_analyze(
     folder_in=NETWORK,
     file_in=[
         'bt_temporal_network.gpickle',
-        'bt_temporal_times',
+        'bt_temporal_times.csv',
         'bt_ton_network.gpickle',
     ],
     label_folder_in='',
     label_file_in='',
     output=False,
     plot=True,
+    pw=True,
 ):
     """
     Calculate sum of outdegree of nodes over time & node
@@ -1331,26 +1316,54 @@ def ton_bt_analyze(
     # Dataframe of outdegress with time as columns
     time_out_degrees = pd.DataFrame.from_dict(time_out_degrees)
 
+    # Sum of out degrees over nodes
+    out_degrees_sum = time_out_degrees.sum(1)
+
     if output:
-        print(
-            sorted(
-                Counter(time_out_degrees.sum(0)).items(), key=lambda x: x[0]
-            )
+        print('Sum of outdegress over nodes')
+        print(out_degrees_sum)
+
+    if plot:
+        plt.figure()
+        ax = sns.histplot(
+            out_degrees_sum,
+            # bins=max(out_degrees_sum),
+            binwidth=100,
+            kde=True,
+            # stat='density',
         )
+        plt.ylabel('Frequency')
+        plt.xlabel('Sum of nodes outdegree')
+        plt.show()
+
+    # Sum of out degrees over times
+    out_degrees_sum = time_out_degrees.sum(0)
+
+    if output:
+        print('Distribution of sum of outdegress over timestamp')
+        print(out_degrees_sum.value_counts(normalize=True))
+
+    if plot:
+        plt.figure()
+        ax = sns.histplot(
+            out_degrees_sum,
+            # bins=max(out_degrees_sum),
+            # binwidth=10,
+            kde=True,
+            # stat='density',
+        )
+        plt.ylabel('Frequency')
+        plt.xlabel('Sum of timestamps outdegree')
+        plt.show()
 
     # Powerlaw correlation of sum of outdegree of nodes over time
-    out_degrees_sum = time_out_degrees.sum(0)
     pl = powerlaw.Fit(out_degrees_sum)
     R, p = pl.distribution_compare('power_law', 'lognormal')
-    if plot:
-        print(pl.power_law.alpha)
-        print(pl.power_law.xmin)
+
+    if pw:
+        print('PowerLaw Alpha:', pl.power_law.alpha)
+        print('PowerLaw Xmin:', pl.power_law.xmin)
         print(R, p)
-    if output:
-        # Max normalize sum of out degrees [0,1]
-        print(out_degrees_sum / max(out_degrees_sum))
-        # Sum of out degrees over nodes
-        print(time_out_degrees.sum(1))
 
 
 # ------------
@@ -1358,7 +1371,7 @@ def ton_bt_analyze(
 # ------------
 
 
-def ew(
+def edge_weight(
     folder_in=NETWORK,
     folder_out=NETWORK,
     file_in=[
@@ -1474,16 +1487,7 @@ def ew(
             label_folder_in,
             label_file_in,
         )
-        N = file_line_count(
-            path_edit(
-                folder_in,
-                [file_in[1]],
-                label_folder_in,
-                label_file_in,
-            )[0]
-        )
-    else:
-        N = len(nodes)
+    N = len(nodes)
 
     # Timestamp
     if times is None:
@@ -1493,16 +1497,7 @@ def ew(
             label_folder_in,
             label_file_in,
         )
-        T = file_line_count(
-            path_edit(
-                folder_in,
-                [file_in[2]],
-                label_folder_in,
-                label_file_in,
-            )[0]
-        )
-    else:
-        T = len(times)
+    T = len(times)
 
     # Edge-Weight dictionary {(u,v):weight}
     ew = {}
@@ -1589,14 +1584,15 @@ def ew(
         plt.figure()
         ax = sns.histplot(
             ls2,
-            bins=max(ls2),
-            kind='kde',
-            hist_kws={
-                "linewidth": 15,
-                'alpha': 1
-            }
+            # bins=max(ls2),
+            binwidth=0.05,
+            binrange=(0, 1),
+            # kde=True,
+            # stat='density',
         )
-        ax.set(xlabel='Horizontal Edge Weight', ylabel='Frequency')
+        plt.ylabel('Frequency')
+        plt.xlabel('Horizontal Edge Weight')
+        plt.show()
 
     return ew
 
@@ -1694,16 +1690,7 @@ def prob(
             label_folder_in,
             label_file_in,
         )
-        N = file_line_count(
-            path_edit(
-                folder_in,
-                [file_in[1]],
-                label_folder_in,
-                label_file_in,
-            )[0]
-        )
-    else:
-        N = len(nodes)
+    N = len(nodes)
 
     # Timestamp
     if times is None:
@@ -1713,16 +1700,7 @@ def prob(
             label_folder_in,
             label_file_in,
         )
-        T = file_line_count(
-            path_edit(
-                folder_in,
-                [file_in[2]],
-                label_folder_in,
-                label_file_in,
-            )[0]
-        )
-    else:
-        T = len(times)
+    T = len(times)
 
     # Edge-Weight dictionary {(u,v):weight}
     ew = {}
@@ -1943,9 +1921,9 @@ def prob_read(
     # Fix index from tuple of (u,v)
     prob.index = list(zip(ew.u, ew.v))
     # Only keep the weights
-    prob = ew['w']
+    prob = prob['w']
     # Convert to dict
-    prob = ew.to_dict()
+    prob = prob.to_dict()
     return prob
 
 
@@ -1983,6 +1961,7 @@ def hits(
     norm_iter=False,
     norm_degree=False,
     norm_damping=False,
+    norm_scale=False,
     output=False,
     plot=False,
     save=True,
@@ -2042,16 +2021,7 @@ def hits(
             label_folder_in,
             label_file_in,
         )
-        N = file_line_count(
-            path_edit(
-                folder_in,
-                [file_in[1]],
-                label_folder_in,
-                label_file_in,
-            )[0]
-        )
-    else:
-        N = len(nodes)
+    N = len(nodes)
 
     # Times
     if times is None:
@@ -2061,16 +2031,7 @@ def hits(
             label_folder_in,
             label_file_in,
         )
-        T = file_line_count(
-            path_edit(
-                folder_in,
-                [file_in[2]],
-                label_folder_in,
-                label_file_in,
-            )[0]
-        )
-    else:
-        T = len(times)
+    T = len(times)
 
     # Edge weight
     if ew is None:
@@ -2100,6 +2061,8 @@ def hits(
         norm_damping = False
 
     # Paper
+    # Kendall shows 3 is most similar to 8 (0.99)
+    # Which is the L2 normalized version of 3
     if version == 3:
         norm_max = False
         norm_final_l1 = False
@@ -2109,6 +2072,9 @@ def hits(
         norm_damping = True  #
 
     # NetX + teleport
+    # Scores are in an exteremly small range and close to 0
+    # Kendall shows 4 is most similar to 5 (tau = 1)
+    # Alos similar to version 9 (= scaled version of 5) with  tau 1
     if version == 4:
         norm_max = True  #
         norm_final_l1 = True  #
@@ -2118,6 +2084,8 @@ def hits(
         norm_damping = True  #
 
     # Book + teleport
+    # Score distrobution is more unifor than all (including 4)
+    # Since, similar to 4, maybe better to use 5 ?
     if version == 5:
         norm_max = False
         norm_final_l1 = False
@@ -2126,7 +2094,11 @@ def hits(
         norm_degree = False
         norm_damping = True  #
 
-    # Paper (degree normalization + teleport) + NetX
+    # Paper (- norm_max) + NetX = Paper + L1
+    # Both norm_max and norm_degree has the same effect
+    # So we can (optionally) disable norm_max and kept L1 from NetX
+    # Similar to 3 (in terms of distrobutions) However ...
+    # Kendall shows 6 is most similar to 7 (0.98) after that 8 (0.96)
     if version == 6:
         norm_max = True  #
         norm_final_l1 = True  #
@@ -2135,7 +2107,11 @@ def hits(
         norm_degree = True  #
         norm_damping = True  #
 
-    # Paper (degree normalization + teleport) + Book
+    # Paper + Book
+    # Converge fast
+    # Distribution wise unifor with saturation near end
+    # Kendalls show 7 is most similar to 6, eventhough dist are different
+    # After that 3 and 8 comes next both with tau 0.97
     if version == 7:
         norm_max = False
         norm_final_l1 = False
@@ -2144,7 +2120,9 @@ def hits(
         norm_degree = True  #
         norm_damping = True  #
 
-    # Paper + final norm L2
+    # Paper + L2
+    # Distributiuon is similar to 3 & 6 but in different range
+    # Kendalls show 8 is similar to 7 and 6
     if version == 8:
         norm_max = False
         norm_final_l1 = False
@@ -2153,14 +2131,25 @@ def hits(
         norm_degree = True  #
         norm_damping = True  #
 
-    # Paper + final norm L2
+    # Book + teleport + finall scaling
+    # Special form of 5 -> 5 + scale [0,1]
+    # More comparable with 3
     if version == 9:
-        norm_max = True  #
+        norm_max = False
         norm_final_l1 = False
         norm_final_l2 = False
-        norm_iter = False
-        norm_degree = True  #
+        norm_iter = True  #
+        norm_degree = False
         norm_damping = True  #
+        norm_scale = True  #
+
+    # Overally interesting ones are: 3,5,7,9
+    # Both 1 & 2 are very similar to 4,5 & 9 -> maybe avoid them ?
+    # 4,5,9 are significatly similar (almost same)
+    # So 9 makes more sense to use because of it similar range [0,1] just like 3
+    # Finally, 6/7 and 3/8 are similar if we want to picl 3 we can do
+    # 3 and 9 (maybe 6 as well ?)
+    # If narrow to 2 option -> (3) damp and degree_norm (9) damp and general (L2) norm
 
     # Initialize scores
     if nstart is None:
@@ -2282,6 +2271,14 @@ def hits(
     if finish_iter == max_iter:
         if output: print(f'Not converged after {finish_iter} iterations')
 
+    # Scale values, MAX = 1
+    if norm_scale:
+        a_max = 1.0 / max(a.values())
+        h_max = 1.0 / max(h.values())
+        for n in a:  # OR for n in h => both are same
+            a[n] *= a_max
+            h[n] *= h_max
+
     # NetX
     # Last normalization (L1) using sum
     # Output in range (0-1) with sum-all = 1
@@ -2311,12 +2308,10 @@ def hits(
     if plot:
         # In most cases, A & H has same value so ploting one of them is enough
         ls_a = sorted(a.values())  # ls_h = sorted(h.values())
-        ax = sns.displot(ls_a, kde=True, rug=True)
-        # BUT if they were different, we can create a dataframe and plot both together
-        # df = pd.DataFrame([a,h]).T
-        # df.columns = 'a h'.split()
-        # plt.figure()
-        # ax = sns.displot(data=df, kind='kde')
+        # ax = sns.displot(ls_a)
+        # ax = sns.displot(ls_a, height=4, aspect=5)
+        ax = sns.displot(ls_a, kde=True, rug=True, height=4, aspect=2.5)
+        ax.set_xlabels('HITS Score')
 
     return a, h
 
@@ -2347,7 +2342,9 @@ def hits_read(
     a = a.to_dict()['a']
     h = h.to_dict()['h']
     # Plot
-    if plot: sns.displot(a.values(), kde=True, rug=True, legend=False)
+    if plot:
+        # TODO: needs to be fixed
+        ax = sns.displot(a.values(), kde=True, rug=True)
     return a, h
 
 
@@ -2357,7 +2354,7 @@ def hits_conditional(
     file_in=[
         'bt_temporal_nodes.csv',
         'bt_temporal_times.csv',
-        'a,csv',
+        'a.csv',
         'h.csv',
     ],
     file_out=[
@@ -2372,7 +2369,7 @@ def hits_conditional(
         'h_norm_node.csv',
         'h_norm_time.csv',
     ],
-    label_folder_in='',
+    label_folder_in=['', ''],
     label_folder_out='',
     label_file_in='',
     label_file_out='',
@@ -2399,10 +2396,10 @@ def hits_conditional(
     if N is None:
         N = file_line_count(
             path_edit(
-                folder_in[0],
                 [file_in[0]],
-                label_folder_in,
+                folder_in[0],
                 label_file_in,
+                label_folder_in[0],
             )[0]
         )
 
@@ -2410,17 +2407,20 @@ def hits_conditional(
     if T is None:
         T = file_line_count(
             path_edit(
-                folder_in[0],
                 [file_in[1]],
-                label_folder_in,
+                folder_in[0],
                 label_file_in,
+                label_folder_in[0],
             )[0]
         )
 
     # Read HITS scores
     if a is None or h is None:
         a, h = hits_read(
-            folder_in[1], file_in[2:4], label_folder_in, label_file_in
+            folder_in[1],
+            file_in[2:4],
+            label_folder_in[1],
+            label_file_in,
         )
 
     # Convert score dict to matrix (N x T)
@@ -2570,7 +2570,7 @@ def hits_analyze(
         'fig_h_corr.pdf',
         'fig_mat.pdf',
     ],
-    label_folder_in='',
+    label_folder_in=['', ''],
     label_folder_out='',
     label_file_in='',
     label_file_out='',
@@ -2582,7 +2582,7 @@ def hits_analyze(
     h=None,
     top=2,
     section=4,
-    report_num=100
+    report_num=-1
 ):
     """
     Analyze HITS scores
@@ -2615,7 +2615,7 @@ def hits_analyze(
         graph = ton_bt_read(
             folder_in[0],
             [file_in[0]],
-            label_folder_in,
+            label_folder_in[0],
             label_file_in,
         )
 
@@ -2624,7 +2624,7 @@ def hits_analyze(
         nodes = temporal_bt_nodes_read(
             folder_in[0],
             [file_in[1]],
-            label_folder_in,
+            label_folder_in[0],
             label_file_in,
         )
     N = len(nodes)
@@ -2634,7 +2634,7 @@ def hits_analyze(
         times = temporal_bt_times_read(
             folder_in[0],
             [file_in[2]],
-            label_folder_in,
+            label_folder_in[0],
             label_file_in,
         )
     times = list(times)
@@ -2645,7 +2645,7 @@ def hits_analyze(
         ew = ew_read(
             folder_in[0],
             [file_in[3]],
-            label_folder_in,
+            label_folder_in[0],
             label_file_in,
         )
 
@@ -2654,7 +2654,7 @@ def hits_analyze(
         a, h = hits_read(
             folder_in[1],
             file_in[4:6],
-            label_folder_in,
+            label_folder_in[1],
             label_file_in,
         )
 
@@ -2681,8 +2681,8 @@ def hits_analyze(
     # Conditional HTIS scores
     cs = hits_conditional_read(
         folder_in[1],
-        file_in[4:14],
-        label_folder_in,
+        file_in[6:16],
+        label_folder_in[1],
         label_file_in,
         return_all=True,
     )
@@ -3248,14 +3248,182 @@ def hits_analyze(
     plt.close(fig)
 
 
-def hits_group(versions=[]):
-    if len(versions) < 1:
-        versions = [str(i) for i in range(1, 10)]  # 1 ... 9
+def hits_group(
+    folder_in=[NETWORK, HITS],
+    folder_out=HITS,
+    file_in=[
+        'bt_ton_network.gpickle',
+        'bt_temporal_nodes.csv',
+        'bt_temporal_times.csv',
+        'bt_ton_weights.csv',
+    ],
+    file_out=[
+        'a.csv',
+        'h.csv',
+        'a_array.csv',
+        'h_array.csv',
+        'a_avg_node.csv',
+        'a_avg_time.csv',
+        'h_avg_node.csv',
+        'h_avg_time.csv',
+        'a_norm_node.csv',
+        'a_norm_time.csv',
+        'h_norm_node.csv',
+        'h_norm_time.csv',
+    ],
+    file_out2=[
+        'report.csv',
+        'top.csv',
+        'fig_a.pdf',
+        'fig_h.pdf',
+        'fig_a_report.pdf',
+        'fig_h_report.pdf',
+        'fig_a_corr.pdf',
+        'fig_h_corr.pdf',
+        'fig_mat.pdf',
+    ],
+    label_folder_in='',
+    # label_folder_out='',
+    label_file_in='',
+    label_file_out='',
+    #
+    graph=None,
+    nodes=None,
+    times=None,
+    ew=None,
+    nstart=None,
+    sigma=0.85,
+    max_iter=100,
+    tol=1.0e-8,
+    #
+    a=None,
+    h=None,
+    N=None,
+    T=None,
+    removed=False,
+    #
+    top=2,
+    section=4,
+    report_num=-1,
+    #
+    output=False,
+    save=True,
+    versions=None
+):
+    if versions is None:
+        versions = list(np.arange(1, 10, 1))  # 1 ... 9
+    auts = {}
+    hubs = {}
     for v in versions:
-        pass
-        # hits
-        # conditional
-        # analyze
+        # label = str(v)
+        label = 'group/' + str(v)
+        os.makedirs(os.path.join(folder_out, label), exist_ok=True)
+        if sigma < 0.85 or sigma > 0.85:
+            label = label + '-' + str(int(sigma * 100))
+        # Hits
+        a, h = hits(
+            folder_in=folder_in[0],
+            folder_out=folder_out,
+            file_in=file_in[0:4],
+            file_out=file_out,
+            label_folder_in=label_folder_in,
+            label_folder_out=label,
+            label_file_in=label_file_in,
+            label_file_out=label_file_out,
+            graph=graph,
+            nodes=nodes,
+            times=times,
+            ew=ew,
+            nstart=nstart,
+            version=v,
+            sigma=sigma,
+            max_iter=max_iter,
+            tol=tol,
+            output=output,
+            save=save,
+        )
+        # Save results for comparisions
+        auts[v] = a
+        hubs[v] = h
+        # Conditional
+        hits_conditional(
+            folder_in=folder_in,
+            folder_out=folder_out,
+            file_in=[file_in[1], file_in[2], file_out[0], file_out[1]],
+            file_out=file_out[2:12],
+            label_folder_in=[label_folder_in, label],
+            label_folder_out=label,
+            label_file_in=label_file_in,
+            label_file_out=label_file_out,
+            a=a,
+            h=h,
+            N=N,
+            T=T,
+            removed=removed,
+            save=save,
+        )
+        # Analyze
+        hits_analyze(
+            folder_in=folder_in,
+            folder_out=folder_out,
+            file_in=file_in + file_out,
+            file_out=file_out2,
+            label_folder_in=[label_folder_in, label],
+            label_folder_out=label,
+            label_file_in=label_file_in,
+            label_file_out=label_file_out,
+            graph=graph,
+            nodes=nodes,
+            times=times,
+            ew=ew,
+            a=a,
+            h=h,
+            top=top,
+            section=section,
+            report_num=-report_num,
+        )
+    # Kendall tau
+    ataus = {}
+    # htaus = {}
+    for i in versions:
+        for j in versions:
+            if i != j and (i, j) not in ataus and (j, i) not in ataus:
+                # arank1 = rank(auts[i])
+                # arank2 = rank(auts[j])
+                arank1 = rank(auts[i], return_rank=True).sort_index().values
+                arank2 = rank(auts[j], return_rank=True).sort_index().values
+                atau, apvalue = stats.kendalltau(arank1, arank2)
+                ataus[(i, j)] = atau
+                ataus[(j, i)] = atau
+                # Hub (= auths)
+                # hrank1 = rank(hubs[i])
+                # hrank2 = rank(hubs[j])
+                # hrank1 = rank(hubs[i], return_rank=True).sort_index().values
+                # hrank2 = rank(hubs[j], return_rank=True).sort_index().values
+                # htau, hpvalue = stats.kendalltau(hrank1, hrank2)
+                # htaus[(i, j)] = htau
+                # htaus[(j, i)] = htau
+    atau = np.eye(len(versions))
+    # htau = np.eye(len(versions))
+    for key in ataus:
+        atau[key[0] - 1, key[1] - 1] = ataus[key]
+    # Plot the Kendalls tau
+    ax = sns.heatmap(
+        atau,
+        linewidth=0.1,
+        annot=True,
+        cmap='YlGnBu',
+        xticklabels=range(1, 10),
+        yticklabels=range(1, 10),
+    )
+    ax.invert_yaxis()
+    plt.title('Kendall Tau of Different HITS Variations')
+    # plt.xlabel('HITS Version')
+    # plt.ylabel('HITS Version')
+    plt.tight_layout()
+    # plt.show()
+    plt.savefig('kendall_tau.pdf', dpi=400)
+    # return ataus
 
 
 # ------------
@@ -3797,9 +3965,7 @@ def hits_remove(
 
     return temporals
 
+
 # -----------------------
 # Intersection Similarity
 # -----------------------
-
-
-
