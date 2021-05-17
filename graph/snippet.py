@@ -1,7 +1,7 @@
 import numpy as np
+import networkx as nx
 
 import matplotlib.pyplot as plt
-from numpy.core.fromnumeric import trace
 
 # List
 # ----
@@ -13,5 +13,52 @@ np.savetxt('test.csv', x, delimiter=',', fmt='%s')
 # Figure
 # ------
 plt.tight_layout()
-plt.savefig(fname='figure.pdf', dpi=300, transparent=True,bbox_inches='tight')
+plt.savefig(fname='figure.pdf', dpi=300, transparent=True, bbox_inches='tight')
+
+# Graph
+# -----
+
+
+def graph_visualize(G):
+    """
+    Visualize a graph while setting timestamp as edge labels
+    """
+    # Define layout
+    # pos = nx.random_layout(G)
+    # pos = nx.spring_layout(G)
+    # pos = nx.shell_layout(G)
+    pos = nx.kamada_kawai_layout(G)
+
+    # Create canvas
+    plt.figure()
+
+    # Turn off axis
+    plt.axis('off')
+
+    # Draw graph
+    nx.draw(
+        G,
+        pos,
+        edge_color='grey',
+        width=1,
+        linewidths=1,
+        node_size=300,
+        node_color='pink',
+        alpha=0.9,
+        labels={node: node
+                for node in G.nodes()}
+    )
+
+    # Draw edge labels
+    edge_labels = {(e[0], e[1]): str(e[2]['t']) for e in G.edges.data()}
+    nx.draw_networkx_edge_labels(
+        G,
+        pos,
+        edge_labels=edge_labels,
+        font_color='black',
+    )
+
+    # Show or save
+    plt.show()
+
 

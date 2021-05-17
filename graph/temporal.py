@@ -7,7 +7,9 @@ import networkx as nx
 from collections import Counter
 from collections import defaultdict
 from itertools import permutations
+
 import scipy.stats as stats
+import numpy.linalg as linalg
 
 import math
 import timeit
@@ -1962,6 +1964,7 @@ def hits(
     norm_degree=False,
     norm_damping=False,
     norm_scale=False,
+    netx_hits=True,
     output=False,
     plot=False,
     save=True,
@@ -2062,7 +2065,7 @@ def hits(
 
     # Paper
     # Kendall shows 3 is most similar to 8 (0.99)
-    # Which is the L2 normalized version of 3
+    # Which 8 is the L2 normalized version of 3
     if version == 3:
         norm_max = False
         norm_final_l1 = False
@@ -2297,6 +2300,27 @@ def hits(
             a[n] *= a_sum
             h[n] *= h_sum
 
+    if version not in np.arange(1, 10, 1) and netx_hits:
+        # Different options for networkX original HITS calculating
+        # (1)
+        # h, a = nx.hits(graph)
+        # (2)
+        # h, a = nx.hits_numpy(graph)
+        # (3)
+        # h, a = nx.hits_scipy(graph)
+        # (4)
+        # Adjacency matrix
+        A = nx.to_numpy_matrix(graph, dtype=int, weight=None)
+        # Eigenvalues and eigenvectors
+        evals, evecs = linalg.eig(A.T)
+        # Largest eigenvector or PageRank
+        # (1)
+        # left_vec = evecs[:, 0].T
+        # (2)
+        left_vec = evecs[:, evals.argmax()].T
+        # Normalizing scores
+        # left_vec /= left_vec.sum()
+
     # Save
     if save:
         pd.DataFrame.from_dict(a, orient='index'
@@ -2344,6 +2368,8 @@ def hits_read(
     # Plot
     if plot:
         # TODO: needs to be fixed
+        # ax = sns.displot(a.values())
+        # ax = sns.displot(a.values(), kde=True)
         ax = sns.displot(a.values(), kde=True, rug=True)
     return a, h
 
@@ -3287,6 +3313,16 @@ def hits_group(
     label_file_in='',
     label_file_out='',
     #
+    versions=None,
+    WR=False,
+    RD=True,
+    DIST=False,
+    TAU=False,
+    #
+    ISIM=True,
+    rep=1,
+    k=0,
+    #
     graph=None,
     nodes=None,
     times=None,
@@ -3308,122 +3344,310 @@ def hits_group(
     #
     output=False,
     save=True,
-    versions=None
 ):
+    """
+    Perfrom a group or series of HITS
+    based on type, if VAR or ISIM ...
+    """
     if versions is None:
         versions = list(np.arange(1, 10, 1))  # 1 ... 9
     auts = {}
     hubs = {}
-    for v in versions:
-        # label = str(v)
-        label = 'group/' + str(v)
-        os.makedirs(os.path.join(folder_out, label), exist_ok=True)
-        if sigma < 0.85 or sigma > 0.85:
-            label = label + '-' + str(int(sigma * 100))
-        # Hits
-        a, h = hits(
-            folder_in=folder_in[0],
-            folder_out=folder_out,
-            file_in=file_in[0:4],
-            file_out=file_out,
-            label_folder_in=label_folder_in,
-            label_folder_out=label,
-            label_file_in=label_file_in,
-            label_file_out=label_file_out,
-            graph=graph,
-            nodes=nodes,
-            times=times,
-            ew=ew,
-            nstart=nstart,
-            version=v,
-            sigma=sigma,
-            max_iter=max_iter,
-            tol=tol,
-            output=output,
-            save=save,
-        )
-        # Save results for comparisions
-        auts[v] = a
-        hubs[v] = h
-        # Conditional
-        hits_conditional(
-            folder_in=folder_in,
-            folder_out=folder_out,
-            file_in=[file_in[1], file_in[2], file_out[0], file_out[1]],
-            file_out=file_out[2:12],
-            label_folder_in=[label_folder_in, label],
-            label_folder_out=label,
-            label_file_in=label_file_in,
-            label_file_out=label_file_out,
-            a=a,
-            h=h,
-            N=N,
-            T=T,
-            removed=removed,
-            save=save,
-        )
-        # Analyze
-        hits_analyze(
-            folder_in=folder_in,
-            folder_out=folder_out,
-            file_in=file_in + file_out,
-            file_out=file_out2,
-            label_folder_in=[label_folder_in, label],
-            label_folder_out=label,
-            label_file_in=label_file_in,
-            label_file_out=label_file_out,
-            graph=graph,
-            nodes=nodes,
-            times=times,
-            ew=ew,
-            a=a,
-            h=h,
-            top=top,
-            section=section,
-            report_num=-report_num,
-        )
+    if WR:
+        for v in versions:
+            label = 'group/' + str(v)
+            os.makedirs(os.path.join(folder_out, label), exist_ok=True)
+            if sigma < 0.85 or sigma > 0.85:
+                label = label + '-' + str(int(sigma * 100))
+            # Hits
+            a, h = hits(
+                folder_in=folder_in[0],
+                folder_out=folder_out,
+                file_in=file_in[0:4],
+                file_out=file_out,
+                label_folder_in=label_folder_in,
+                label_folder_out=label,
+                label_file_in=label_file_in,
+                label_file_out=label_file_out,
+                graph=graph,
+                nodes=nodes,
+                times=times,
+                ew=ew,
+                nstart=nstart,
+                version=v,
+                sigma=sigma,
+                max_iter=max_iter,
+                tol=tol,
+                output=output,
+                save=save,
+            )
+            # Save results for comparisions
+            auts[v] = a
+            hubs[v] = h
+            # Conditional
+            hits_conditional(
+                folder_in=folder_in,
+                folder_out=folder_out,
+                file_in=[file_in[1], file_in[2], file_out[0], file_out[1]],
+                file_out=file_out[2:12],
+                label_folder_in=[label_folder_in, label],
+                label_folder_out=label,
+                label_file_in=label_file_in,
+                label_file_out=label_file_out,
+                a=a,
+                h=h,
+                N=N,
+                T=T,
+                removed=removed,
+                save=save,
+            )
+            # Analyze
+            hits_analyze(
+                folder_in=folder_in,
+                folder_out=folder_out,
+                file_in=file_in + file_out,
+                file_out=file_out2,
+                label_folder_in=[label_folder_in, label],
+                label_folder_out=label,
+                label_file_in=label_file_in,
+                label_file_out=label_file_out,
+                graph=graph,
+                nodes=nodes,
+                times=times,
+                ew=ew,
+                a=a,
+                h=h,
+                top=top,
+                section=section,
+                report_num=-report_num,
+            )
+    if RD:
+        for v in versions:
+            label = 'group/' + str(v)
+            os.makedirs(os.path.join(folder_out, label), exist_ok=True)
+            if sigma < 0.85 or sigma > 0.85:
+                label = label + '-' + str(int(sigma * 100))
+            # Hits
+            auts[v], hubs[v] = hits_read(
+                folder_in=folder_in[1],
+                file_in=file_out[0:2],
+                label_folder_in=label,
+                label_file_in=label_file_in,
+                output=output,
+                plot=False,
+            )
+
     # Kendall tau
-    ataus = {}
-    # htaus = {}
-    for i in versions:
-        for j in versions:
-            if i != j and (i, j) not in ataus and (j, i) not in ataus:
-                # arank1 = rank(auts[i])
-                # arank2 = rank(auts[j])
-                arank1 = rank(auts[i], return_rank=True).sort_index().values
-                arank2 = rank(auts[j], return_rank=True).sort_index().values
-                atau, apvalue = stats.kendalltau(arank1, arank2)
-                ataus[(i, j)] = atau
-                ataus[(j, i)] = atau
-                # Hub (= auths)
-                # hrank1 = rank(hubs[i])
-                # hrank2 = rank(hubs[j])
-                # hrank1 = rank(hubs[i], return_rank=True).sort_index().values
-                # hrank2 = rank(hubs[j], return_rank=True).sort_index().values
-                # htau, hpvalue = stats.kendalltau(hrank1, hrank2)
-                # htaus[(i, j)] = htau
-                # htaus[(j, i)] = htau
-    atau = np.eye(len(versions))
-    # htau = np.eye(len(versions))
-    for key in ataus:
-        atau[key[0] - 1, key[1] - 1] = ataus[key]
-    # Plot the Kendalls tau
-    ax = sns.heatmap(
-        atau,
-        linewidth=0.1,
-        annot=True,
-        cmap='YlGnBu',
-        xticklabels=range(1, 10),
-        yticklabels=range(1, 10),
-    )
-    ax.invert_yaxis()
-    plt.title('Kendall Tau of Different HITS Variations')
-    # plt.xlabel('HITS Version')
-    # plt.ylabel('HITS Version')
-    plt.tight_layout()
-    # plt.show()
-    plt.savefig('kendall_tau.pdf', dpi=400)
-    # return ataus
+    taus = {}
+    if TAU:
+        for i in versions:
+            for j in versions:
+                if i != j and (i, j) not in taus and (j, i) not in taus:
+                    # arank1 = rank(auts[i])
+                    # arank2 = rank(auts[j])
+                    arank1 = rank(auts[i],
+                                  return_rank=True).sort_index().values
+                    arank2 = rank(auts[j],
+                                  return_rank=True).sort_index().values
+                    tau, apvalue = stats.kendalltau(arank1, arank2)
+                    taus[(i, j)] = tau
+                    taus[(j, i)] = tau
+        atau = np.eye(len(versions))
+        # htau = np.eye(len(versions))
+        for key in taus:
+            atau[key[0] - 1, key[1] - 1] = taus[key]
+        # Plot the Kendalls tau
+        ax = sns.heatmap(
+            tau,
+            linewidth=0.1,
+            annot=True,
+            cmap='YlGnBu',
+            xticklabels=range(1, 10),
+            yticklabels=range(1, 10),
+        )
+        ax.invert_yaxis()
+        plt.title('Kendall Tau of Different HITS Variations')
+        # plt.xlabel('HITS Version')
+        # plt.ylabel('HITS Version')
+        plt.tight_layout()
+        # plt.show()
+        plt.savefig('kendall_tau.pdf', dpi=400)
+
+    # Intersection similarity
+    isims = {}
+    if ISIM:
+        for i in versions:
+            for j in versions:
+                if i != j and (i, j) not in isims and (j, i) not in isims:
+                    isims[(i, j)] = isim_hits(
+                        auts[i],
+                        auts[j],
+                        str(i),
+                        str(j),
+                        # rep=rep,
+                        # k=k,
+                        rep=1000,
+                        k=1000,
+                    )
+                    isims[(j, i)] = 0
+
+    # Return
+    return {
+        'hits': (auts, hubs),
+        'tau': taus,
+        'isim': isims,
+    }
+
+
+# -----------------------
+# Intersection Similarity
+# -----------------------
+
+# def isim_hits(
+#     scores1,
+#     scores2,
+#     name1='',
+#     name2='',
+#     rep=1,
+#     plot=True,
+# ):
+#     """
+#     Receives two dictionary of {node:score}
+#     where one can have a subset of keys from another one {keys1} <= {keys2}
+#     First add
+#     """
+#     uniq1 = len(set(scores1.values())) / len(scores1)
+#     uniq2 = len(set(scores2.values())) / len(scores2)
+#     print(f'|S1| = {len(scores1)} with {uniq1 * 100:.2f} % unique scores')
+#     print(f'|S2| = {len(scores2)} with {uniq2 * 100:.2f} % unique scores')
+#     uniqmin = min([uniq1, uniq2])
+#     lenmax = max([len(scores1), len(scores2)])
+#     # Number of experiment repeat
+#     if rep < 1:
+#         rep = int(lenmax * (1 - (uniqmin)))
+#         print(f'repeat for {rep}')
+#     if len(scores1) > len(scores2):
+#         rem = set(scores1).difference(set(scores2))
+#         for key in rem:
+#             scores2[key] = 0
+#     elif len(scores1) < len(scores2):
+#         rem = set(scores2).difference(set(scores1))
+#         for key in rem:
+#             scores1[key] = 0
+#     # List of nodes index sorted based on rank low-to-high or score high-to-low
+#     r1 = breakdown(scores1, 0, True)[0]
+#     r2 = breakdown(scores2, 0, True)[0]
+#     isims = defaultdict(list)
+#     for r in range(rep):
+#         isim = []
+#         for i in range(1, len(r1) + 1):
+#             s1 = set(r1[:i])
+#             s2 = set(r2[:i])
+#             dif = s1 ^ s2
+#             isim.append(len(dif) / (2 * i))
+#         for i in range(len(isim)):
+#             isims[i].append(sum(isim[:i + 1]) / (i + 1))
+
+#     # Covert all result to dataframe for futher visualization
+#     df = pd.DataFrame.from_dict(isims)
+#     if plot:
+#         fig, ax = plt.subplots()
+#         df.mean().plot(title='Intersection Similarity', ax=ax)
+#         fig_name = 'isim' + '-' + name1 + '-' + name2 + '.pdf'
+#         plt.title('Intersection Similarity ' + name1 + '-' + name2)
+#         plt.tight_layout()
+#         # plt.show()
+#         plt.savefig(fig_name, dpi=400)
+#     return df
+
+
+def isim_hits(
+    scores1,
+    scores2,
+    name1='',
+    name2='',
+    rep=1,
+    k=0,
+    output=True,
+    plot=True,
+):
+    """
+    Second version of intersection similarity for HITS scores from two observations
+    the difference is that, we assume second observation comes from graph where some
+    of high rank nodes are being removed the second list is smaller than first
+    despite version 1, we don't add score 0 for removed nodes, but we only consider
+    a smaller version of larger set equalt to smaller set so that both have same size
+    and ISIM is only being calculated on common set of nodes, therefore the number of
+    K as maximum size of ISIM would be based on intersection set
+    """
+    uniq1 = len(set(scores1.values())) / len(scores1)
+    uniq2 = len(set(scores2.values())) / len(scores2)
+    if output:
+        print(
+            f'|S{name1}| = {len(scores1)} with {uniq1 * 100:.2f} % unique scores'
+        )
+        print(
+            f'|S{name2}| = {len(scores2)} with {uniq2 * 100:.2f} % unique scores'
+        )
+        print()
+    uniqmin = min([uniq1, uniq2])
+    lenmax = max([len(scores1), len(scores2)])
+    # Number of experiment repeat
+    if rep < 1:
+        rep = int(lenmax * (1 - (uniqmin)))
+        print(f'repeat for {rep}')
+    # Intersection of keys of two score dictionary
+    com = set(scores1).intersection(set(scores2))
+    # Only consider scores of common nodes
+    if len(scores1) > len(scores2):
+        scores1 = {key: scores1[key] for key in com}
+    elif len(scores1) < len(scores2):
+        scores2 = {key: scores2[key] for key in com}
+    # Only consider top K nodes in list if K is initializem, other wise => size(nodes)
+    rtn = False
+    if k < 1:
+        rtn = True
+    else:
+        # Check k is not larger than size(nodes)
+        if k > len(scores1):
+            k = len(scores1)
+    # Intersection similarity of two rank set
+    isims = defaultdict(list)
+    for r in range(rep):
+        isim = []
+        # List of nodes sorted based on low-to-high rank = high-to-low score
+        r1 = breakdown(scores1, k, rtn)[0]
+        r2 = breakdown(scores2, k, rtn)[0]
+        for i in range(1, len(r1) + 1):
+            s1 = set(r1[:i])
+            s2 = set(r2[:i])
+            dif = s1 ^ s2
+            isim.append(len(dif) / (2 * i))
+        for i in range(len(isim)):
+            isims[i].append(sum(isim[:i + 1]) / (i + 1))
+    # Covert all result to dataframe for futher visualization
+    df = pd.DataFrame.from_dict(isims)
+    if plot:
+        fig, ax = plt.subplots()
+        # (1)
+        # df.mean().plot(ax=ax)
+        # (2)
+        X = np.arange(1, k + 1)
+        Y_min = df.min(axis=0)
+        Y_max = df.max(axis=0)
+        Y_mean = df.mean(axis=0)
+        ax.plot(X, Y_mean)
+        ax.fill_between(X, Y_max, Y_min, alpha=0.5)
+        if len(name1) > 0 and len(name2) > 0:
+            fig_name = 'isim' + '-' + name1 + '-' + name2 + '.pdf'
+            plt.title('Intersection Similarity ' + name1 + '-' + name2)
+        else:
+            fig_name = 'isim.pdf'
+            plt.title('Intersection Similarity')
+        plt.tight_layout()
+        plt.savefig(fig_name, dpi=400)
+        # plt.show()
+    return df
 
 
 # ------------
@@ -3472,7 +3696,7 @@ def hits_remove(
         'fig_h_corr.pdf',
         'fig_mat.pdf',
     ],
-    label_folder_in='',
+    label_folder_in=['', ''],
     label_folder_out='remove',
     label_file_in='',
     label_file_out='',
@@ -3542,7 +3766,7 @@ def hits_remove(
         graph = ton_bt_read(
             folder_in[0],
             [file_in[0]],
-            label_folder_in,
+            label_folder_in[0],
             label_file_in,
         )
 
@@ -3551,7 +3775,7 @@ def hits_remove(
         nodes = temporal_bt_nodes_read(
             folder_in[0],
             [file_in[1]],
-            label_folder_in,
+            label_folder_in[0],
             label_file_in,
         )
     N = len(nodes)
@@ -3561,7 +3785,7 @@ def hits_remove(
         times = temporal_bt_times_read(
             folder_in[0],
             [file_in[2]],
-            label_folder_in,
+            label_folder_in[0],
             label_file_in,
         )
     times = list(times)
@@ -3575,7 +3799,7 @@ def hits_remove(
         ew = ew_read(
             folder_in[0],
             [file_in[3]],
-            label_folder_in,
+            label_folder_in[0],
             label_file_in,
         )
 
@@ -3584,7 +3808,7 @@ def hits_remove(
         a, h = hits_read(
             folder_in[1],
             file_in[4:6],
-            label_folder_in,
+            label_folder_in[1],
             label_file_in,
         )
 
@@ -3722,9 +3946,7 @@ def hits_remove(
             linewidth=0.5,
             cmap='YlGnBu',
             xticklabels=list(range(7, 24)),
-            yticklabels=[
-                'Mon', 'Tue', 'Wedfile_out_new', 'Thu', 'Fri', 'Sat', 'Sun'
-            ]
+            yticklabels=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
         )
         ax.set_title('Average hub score over days and hours')
         plt.show()
@@ -3758,10 +3980,12 @@ def hits_remove(
     tons = {}  # Dict of TON model graphs
     auts = {}  # Dict of authority scores
     hubs = {}  # Dict of hub scores
+    taus = {}  # Dict of kendall tau correlations
+    isims = {}  # Dict if intersection similarities
 
     # Add initial graphs and scores here
     temporal = temporal_bt_read()
-    M_tem = temporal.number_of_edges()
+    M = temporal.number_of_edges()
 
     if return_graphs:
         tons[epoch_0] = graph
@@ -3789,6 +4013,8 @@ def hits_remove(
             label_file_out,
             label_epoch,
         )
+        # Create folders (if don't exist)
+        os.makedirs(os.path.join(folder_out, label_epoch), exist_ok=True)
 
         # Empty list of node to be removed ...
         selected_nodes.clear()
@@ -3874,6 +4100,25 @@ def hits_remove(
                 f' or {(N_ton - graph.number_of_nodes()) / N_ton * 100:.2f} % and {M_ton - graph.number_of_edges()}'
                 f' edges out of {M_ton} or {(M_ton - graph.number_of_edges()) / M_ton * 100:.2f} %'
             )
+            con = nx.algorithms.components.is_weakly_connected(graph)
+            den = nx.classes.function.density(graph)
+            # dim = graph.number_of_nodes()
+            cc = 1
+            if not con:
+                cc = nx.algorithms.components.number_weakly_connected_components(
+                    graph
+                )
+                largest_cc = max(
+                    nx.weakly_connected_components(graph), key=len
+                )
+                # dim = nx.algorithms.distance_measures.diameter(largest_cc)
+            # else:
+            # dim = nx.algorithms.distance_measures.diameter(graph)
+            print(f'Network is ', end='')
+            if not con: print('not ', end='')
+            print(
+                f'connected with density of {den} and {cc} connected components.'
+            )
             print()
 
         # ACTIONS
@@ -3889,14 +4134,17 @@ def hits_remove(
             # Update number of nodes and timestamp in temporal graph (not TON)
             N_tem = file_line_count(file_out_new[3])
             T_tem = file_line_count(file_out_new[4])
+            M_tem = temporal.number_of_edges()
             if output:
                 print(
                     f'Removed {N - N_tem} nodes out of {N}'
-                    f' or {(N - N_tem) / N*100:.2f} % and {M - temporal.number_of_edges()}'
-                    f' edges out of {M} or {(M - temporal.number_of_edges()) / M * 100:.2f} %'
+                    f' or {(N - N_tem) / N*100:.2f} % and {M - M_tem}'
+                    f' edges out of {M} or {(M - M_tem) / M * 100:.2f} %'
+                    f' and have {T_tem} timestamps out of {T}.'
                 )
                 print()
             # If returning
+            # Save original temporal graph as well
             if return_graphs: temporals[epoch_0] = temporal
 
         # Convert TEMPORAL to STATIC then save
@@ -3906,7 +4154,7 @@ def hits_remove(
         # Calculate HITS on new TON graph
         if 2 in actions:
             # Edge-Weight
-            ew = ew(
+            ew = edge_weight(
                 label_folder_in=label_epoch,
                 label_folder_out=label_epoch,
                 graph=graph,  # updated
@@ -3921,6 +4169,7 @@ def hits_remove(
             )
             # HITS
             a_new, h_new = hits(
+                folder_out=NETWORK,
                 label_folder_in=label_epoch,
                 label_folder_out=label_epoch,
                 graph=graph,  # updated
@@ -3935,9 +4184,10 @@ def hits_remove(
             hubs[epoch_0] = h_new
             # Conditional HITS scores
             hits_conditional(
+                folder_in=[NETWORK, NETWORK],
+                folder_out=NETWORK,
                 label_folder_in=label_epoch,
                 label_folder_out=label_epoch,
-                graph=graph,  # updated
                 a=a_new,
                 h=h_new,
                 N=N,
@@ -3946,7 +4196,9 @@ def hits_remove(
             )
             # Analyze HITS
             hits_analyze(
-                label_folder_in=label_epoch,
+                folder_in=[NETWORK, NETWORK],
+                folder_out=NETWORK,
+                label_folder_in=[label_epoch, label_epoch],
                 label_folder_out=label_epoch,
                 graph=graph,  # updated
                 nodes=nodes,  # original
@@ -3956,16 +4208,144 @@ def hits_remove(
                 h=h_new,  # updated
                 top=2,
                 section=4,
-                report_num=100
+                report_num=-1
             )
 
         # Update epoch and ...
         epoch_0 += 1
         remove_0 = (N_ton - graph.number_of_nodes()) / N_ton
 
-    return temporals
+    # Kendall tau for HITS score after removal - implementation # 1
+    if 3 in actions:
+        for e1 in auts:
+            for e2 in auts:
+                if e1 != e2 and (e1, e2) not in taus and (e2, e1) not in taus:
+                    # Find common number of nodes or key
+                    comm = set(auts[e1]).intersection(set(auts[e2]))
+                    scores1 = {}
+                    scores2 = {}
+                    for key in comm:
+                        scores1[key] = auts[e1][key]
+                        scores2[key] = auts[e2][key]
+                    rank1 = rank(scores1, return_rank=True).sort_index().values
+                    rank2 = rank(scores2, return_rank=True).sort_index().values
+                    tau, pvalue = stats.kendalltau(rank1, rank2)
+                    taus[(e1, e2)] = tau
+                    taus[(e2, e1)] = tau
+        # Covert tau dict to 2d array for visualization
+        taus_array = np.eye(epoch_0 + 1)
+        for key in taus:
+            taus_array[key[0], key[1]] = taus[key]
+        # Plot the Kendalls tau
+        fig, ax = plt.subplots(figsize=(16, 12))
+        ax = sns.heatmap(
+            taus_array,
+            linewidth=0.5,
+            annot=True,
+            cmap='YlGnBu',
+            ax=ax,
+        )
+        ax.invert_yaxis()
+        plt.title(
+            'Kendall Tau of Nodes Rank from HITS\nAfter Each Node-Removal Iteration'
+        )
+        plt.tight_layout()
+        # plt.show()
+        plt.savefig('kendall_tau_removal1.pdf', dpi=400)
+
+    # Kendall tau for HITS score after removal - implementation # 2
+    if 4 in actions:
+        n_set = set(np.arange(N_ton))  # [0 ... 8428)
+        for e1 in auts:
+            for e2 in auts:
+                if e1 != e2 and (e1, e2) not in taus and (e2, e1) not in taus:
+                    # Find missing/removed nodes from new HITS score
+                    # Add score of 0 for removed nodes
+                    temp1 = auts[e1].copy()
+                    temp2 = auts[e2].copy()
+                    rem = n_set.difference(set(temp1))
+                    for key in rem:
+                        temp1[key] = 0
+                    rem = n_set.difference(set(temp2))
+                    for key in rem:
+                        temp2[key] = 0
+                    # Now we get MAX rank of 8427 for removed nodes in both score sets
+                    rank1 = rank(temp1, method='max',
+                                 return_rank=True).sort_index().values
+                    rank2 = rank(temp2, method='max',
+                                 return_rank=True).sort_index().values
+                    tau, pvalue = stats.kendalltau(rank1, rank2)
+                    taus[(e1, e2)] = tau
+                    taus[(e2, e1)] = tau
+        # Covert tau dict to 2d array for visualization
+        taus_array = np.eye(epoch_0)
+        for key in taus:
+            taus_array[key[0], key[1]] = taus[key]
+        # Plot the Kendalls tau
+        fig, ax = plt.subplots(figsize=(16, 12))
+        ax = sns.heatmap(
+            taus_array,
+            linewidth=0.5,
+            annot=True,
+            cmap='YlGnBu',
+            ax=ax,
+        )
+        ax.invert_yaxis()
+        plt.title(
+            'Kendall Tau of Nodes Rank from HITS\nAfter Each Node-Removal Iteration'
+        )
+        plt.tight_layout()
+        # plt.show()
+        plt.savefig('kendall_tau_removal2.pdf', dpi=400)
+
+    # Intersection similarity
+    if 5 in actions:
+        for e1 in auts:
+            for e2 in auts:
+                if e1 != e2 and (e1,
+                                 e2) not in isims and (e2, e1) not in isims:
+                    isims[(e1, e2)
+                          ] = isim_hits(auts[e1], auts[e2], str(e1), str(e2))
+                    isims[(e2, e1)] = 0
+
+    return {
+        'temporal': temporals,
+        'ton': tons,
+        'hits': (auts, hubs),
+        'tau': taus,
+        'isim': isims,
+    }
 
 
-# -----------------------
-# Intersection Similarity
-# -----------------------
+# ------------
+# Reachability
+# ------------
+
+
+def reachability(
+    folder_in=NETWORK,
+    folder_out=NETWORK,
+    file_in=[
+        'bt_ton_network.gpickle',
+        'bt_temporal_nodes.csv',
+        'bt_temporal_times.csv',
+        'bt_ton_weights.csv',
+    ],
+    file_out=[
+        'reachability.csv',
+    ],
+    label_folder_in='',
+    label_folder_out='',
+    label_file_in='',
+    label_file_out='',
+    graph=None,
+    times=None,
+    nodes=None,
+    ew=None,
+    output=True,
+    plot=False,
+    save=True,
+):
+    print()
+    # Shortest path lenght of all nodes
+    spl = dict(nx.all_pairs_shortest_path_length(graph))
