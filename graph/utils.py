@@ -304,7 +304,7 @@ def label_amend(label_list, input_label, end=True):
     return label_list
 
 
-def rank(x, return_rank=False, method='dense'):
+def rank(x, method='dense', return_rank=False):
     """
     Rank items of a container from largest to smallest value
     and return a list of [(index,value,rank)]
