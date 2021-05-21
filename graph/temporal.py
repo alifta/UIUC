@@ -7,6 +7,7 @@ import networkx as nx
 from collections import Counter
 from collections import defaultdict
 from itertools import permutations
+from networkx.algorithms import distance_measures
 
 import scipy.stats as stats
 import numpy.linalg as linalg
@@ -4342,10 +4343,106 @@ def reachability(
     times=None,
     nodes=None,
     ew=None,
-    output=True,
-    plot=False,
+    # output=True,
+    # plot=False,
     save=True,
 ):
-    print()
+    # Edit paths
+    file_out = path_edit(
+        file_out,
+        folder_out,
+        label_file_out,
+        label_folder_out,
+    )
+
+    # Reading graph
+    if graph is None:
+        graph = ton_bt_read(
+            folder_in,
+            [file_in[0]],
+            label_folder_in,
+            label_file_in,
+        )
+
+    # Reading nodes
+    if nodes is None:
+        nodes = temporal_bt_nodes_read(
+            folder_in,
+            [file_in[1]],
+            label_folder_in,
+            label_file_in,
+        )
+    N = len(nodes)
+
+    # Reading times
+    if times is None:
+        times = temporal_bt_times_read(
+            folder_in,
+            [file_in[2]],
+            label_folder_in,
+            label_file_in,
+        )
+    T = len(times)
+
+    # Reading edge weight
+    if ew is None:
+        ew = ew_read(
+            folder_in,
+            [file_in[3]],
+            label_folder_in,
+            label_file_in,
+        )
+
+    # Dictionary of all path lengths or reachability
+    paths = {}
+    for n1 in range(28):
+        for t1 in range(300):
+            for n2 in range(28):
+                for t2 in range(300):
+                    if n1 != n2 and t1 < t2:
+                        paths[(n1, n2, t1, t2)] = np.inf
+    paths_size = len(paths)
+
     # Shortest path lenght of all nodes
     spl = dict(nx.all_pairs_shortest_path_length(graph))
+
+    # Dataframe of all reachable paths P(n1,n2,t1,t2)
+    df = []
+    distances = []
+    reached = set()
+    for n1 in spl:
+        # Parent of source node
+        p1 = n1 % N
+        t1 = n1 // N
+        for n2 in spl[n1]:
+            p2 = n2 % N
+            t2 = n2 // N
+            # Nodes with different parents and timestamps
+            if p1 != p2:
+                # Add path to reachability dataframe
+                # df.append((p1, p2, t1, t2, spl[n1][n2]))
+                df.append((p1, p2, t1, t2))
+                distances.append(spl[n1][n2])
+                # Update paths dictionary
+                paths[(p1, p2, t1, t2)] = spl[n1][n2]
+                # Saved observed paths so can remaining can be calculated
+                reached.add((p1, p2, t1, t2))
+    
+    # Add unexisting paths to dataframe
+    rem = set(paths.keys()).difference(reached)
+    for path in rem:
+        df.append((path[0], path[1], path[2], path[3]))
+        distances.append(np.inf)
+
+    # Create dataframe of reachability
+    # df = pd.DataFrame(df, columns=['n1', 'n2', 't1', 't2', 'd'])
+    df = pd.DataFrame(df, columns=['n1', 'n2', 't1', 't2'])
+    df['d'] = distances
+
+    # Check extra paths for reachability
+    # TODO fix following
+    for key_nodes, group_distance in df.groupby(['n1', 'n2']):
+            print(group_distance)
+
+    # Save paths distance dataframe
+    df.to_csv(file_out[0], header=False, index=False)

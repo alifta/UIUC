@@ -10,6 +10,21 @@ import matplotlib.pyplot as plt
 x = np.arange(0.0, 5.0, 1.0)
 np.savetxt('test.csv', x, delimiter=',', fmt='%s')
 
+# Class
+# -----
+
+
+# Check for class inheritance relationships
+class BaseClass:
+    pass
+
+
+class SubClass(BaseClass):
+    pass
+
+
+print(issubclass(SubClass, BaseClass))  # True
+
 # Figure
 # ------
 plt.tight_layout()
@@ -60,5 +75,3 @@ def graph_visualize(G):
 
     # Show or save
     plt.show()
-
-
