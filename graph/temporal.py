@@ -4408,7 +4408,7 @@ def reachability(
 
     # Dataframe of all reachable paths P(n1,n2,t1,t2)
     df = []
-    distances = []
+    tdistances = []
     reached = set()
     for n1 in spl:
         # Parent of source node
@@ -4422,27 +4422,66 @@ def reachability(
                 # Add path to reachability dataframe
                 # df.append((p1, p2, t1, t2, spl[n1][n2]))
                 df.append((p1, p2, t1, t2))
-                distances.append(spl[n1][n2])
+                tdistances.append(spl[n1][n2])
                 # Update paths dictionary
                 paths[(p1, p2, t1, t2)] = spl[n1][n2]
                 # Saved observed paths so can remaining can be calculated
                 reached.add((p1, p2, t1, t2))
-    
+
     # Add unexisting paths to dataframe
     rem = set(paths.keys()).difference(reached)
     for path in rem:
         df.append((path[0], path[1], path[2], path[3]))
-        distances.append(np.inf)
+        tdistances.append(np.inf)
 
     # Create dataframe of reachability
     # df = pd.DataFrame(df, columns=['n1', 'n2', 't1', 't2', 'd'])
     df = pd.DataFrame(df, columns=['n1', 'n2', 't1', 't2'])
-    df['d'] = distances
+    df['d'] = tdistances
 
-    # Check extra paths for reachability
+    # Check paths for hop number or node-distance (not temporal distance)
+    ndistances = []
+    between = {}
     # TODO fix following
-    for key_nodes, group_distance in df.groupby(['n1', 'n2']):
-            print(group_distance)
+    for n1 in spl:
+        p1 = n1 % N
+        t1 = n1 // N
+        for n2 in spl[n1]:
+            p2 = n2 % N
+            t2 = n2 // N
+            if p1 != p2:
+                q = df.loc[(df['n1'] == p1) & (df['n2'] == p2) &
+                           (df['t1'] >= t1) & (df['t2'] <= t2)]
+                # If there is only one node (1-hop) between two nodes A -> B
+                if q.d.min() == 1:
+                    ndistances.append(1)
+
+                # If it is not a direct connection and intermediate nodes are incolved
+                if q.d.min() > 1:
+                    # Look at the different shortest paths
+                    sps = [np.array(p)%N for p in nx.all_shortest_paths(T, source=n1, target=n2)]
+                    # Extract the intermediate nodes
+                    # Save in a dictionary based on length
+                    spd = defaultdict(list)
+                    for x in sps:
+                        # Remove consecutive nodes (same node, next or previous time)
+                        temp = [v for i, v in enumerate(x) if i == 0 or v != x[i-1]]
+                        spd[len(temp)].append(temp)
+                    # Check the shortest extracted paths
+                    min_hop = min(spd.keys())
+                    ndistances.append(min_hop)
+                    for x in spd[min_hop]:
+                        int_nodes = np.unique(x[1:-1])
+                    sps = spd[min(spd.keys())]
+
+
+
+    # Sort the dataframe
+    df.sort_values(
+        by=['n1', 'n2', 't1', 't2'],
+        inplace=True,
+        ignore_index=True,
+    )
 
     # Save paths distance dataframe
     df.to_csv(file_out[0], header=False, index=False)
