@@ -4408,11 +4408,7 @@ def reachability(
 
     # Dataframe of all reachable paths P(n1,n2,t1,t2)
     df = []
-<<<<<<< HEAD
     tdistances = []
-=======
-    distances = []
->>>>>>> 2661ef652c0f40bbbc6d7361ceb51a67e701665a
     reached = set()
     for n1 in spl:
         # Parent of source node
@@ -4426,34 +4422,20 @@ def reachability(
                 # Add path to reachability dataframe
                 # df.append((p1, p2, t1, t2, spl[n1][n2]))
                 df.append((p1, p2, t1, t2))
-<<<<<<< HEAD
                 tdistances.append(spl[n1][n2])
-=======
-                distances.append(spl[n1][n2])
->>>>>>> 2661ef652c0f40bbbc6d7361ceb51a67e701665a
                 # Update paths dictionary
                 paths[(p1, p2, t1, t2)] = spl[n1][n2]
                 # Saved observed paths so can remaining can be calculated
                 reached.add((p1, p2, t1, t2))
-<<<<<<< HEAD
-
-=======
-    
->>>>>>> 2661ef652c0f40bbbc6d7361ceb51a67e701665a
     # Add unexisting paths to dataframe
     rem = set(paths.keys()).difference(reached)
     for path in rem:
         df.append((path[0], path[1], path[2], path[3]))
-<<<<<<< HEAD
         tdistances.append(np.inf)
-=======
-        distances.append(np.inf)
->>>>>>> 2661ef652c0f40bbbc6d7361ceb51a67e701665a
 
     # Create dataframe of reachability
     # df = pd.DataFrame(df, columns=['n1', 'n2', 't1', 't2', 'd'])
     df = pd.DataFrame(df, columns=['n1', 'n2', 't1', 't2'])
-<<<<<<< HEAD
     df['d'] = tdistances
 
     # Check paths for hop number or node-distance (not temporal distance)
@@ -4499,14 +4481,6 @@ def reachability(
         inplace=True,
         ignore_index=True,
     )
-=======
-    df['d'] = distances
-
-    # Check extra paths for reachability
-    # TODO fix following
-    for key_nodes, group_distance in df.groupby(['n1', 'n2']):
-            print(group_distance)
->>>>>>> 2661ef652c0f40bbbc6d7361ceb51a67e701665a
 
     # Save paths distance dataframe
     df.to_csv(file_out[0], header=False, index=False)
