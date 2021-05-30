@@ -11,12 +11,12 @@ network
 remove
 temporal
 
-<<<<<<< HEAD
 # Data
 *.csv
 
-=======
->>>>>>> 2661ef652c0f40bbbc6d7361ceb51a67e701665a
+# VS Code
+.vscode
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
