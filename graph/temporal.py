@@ -4322,6 +4322,165 @@ def hits_remove(
 # Reachability
 # ------------
 
+# def reachability(
+#     folder_in=NETWORK,
+#     folder_out=NETWORK,
+#     file_in=[
+#         'bt_ton_network.gpickle',
+#         'bt_temporal_nodes.csv',
+#         'bt_temporal_times.csv',
+#         'bt_ton_weights.csv',
+#     ],
+#     file_out=[
+#         'reachability.csv',
+#     ],
+#     label_folder_in='',
+#     label_folder_out='',
+#     label_file_in='',
+#     label_file_out='',
+#     graph=None,
+#     times=None,
+#     nodes=None,
+#     ew=None,
+#     # output=True,
+#     # plot=False,
+#     save=True,
+# ):
+#     # Edit paths
+#     file_out = path_edit(
+#         file_out,
+#         folder_out,
+#         label_file_out,
+#         label_folder_out,
+#     )
+
+#     # Reading graph
+#     if graph is None:
+#         graph = ton_bt_read(
+#             folder_in,
+#             [file_in[0]],
+#             label_folder_in,
+#             label_file_in,
+#         )
+
+#     # Reading nodes
+#     if nodes is None:
+#         nodes = temporal_bt_nodes_read(
+#             folder_in,
+#             [file_in[1]],
+#             label_folder_in,
+#             label_file_in,
+#         )
+#     N = len(nodes)
+
+#     # Reading times
+#     if times is None:
+#         times = temporal_bt_times_read(
+#             folder_in,
+#             [file_in[2]],
+#             label_folder_in,
+#             label_file_in,
+#         )
+#     T = len(times)
+
+#     # Reading edge weight
+#     # if ew is None:
+#     #     ew = ew_read(
+#     #         folder_in,
+#     #         [file_in[3]],
+#     #         label_folder_in,
+#     #         label_file_in,
+#     #     )
+
+#     # All possible paths
+#     all_paths = {}
+#     for n1 in range(N):
+#         for t1 in range(T):
+#             for n2 in range(N):
+#                 for t2 in range(T):
+#                     if n1 != n2 and t1 < t2:
+#                         all_paths[(n1, n2, t1, t2)] = np.inf
+
+#     # All existing network shortest path lenght (SPL)
+#     spl = dict(nx.all_pairs_shortest_path_length(graph))
+
+#     # Convert N1 -> N2 to Path of (Parent N1, Parent N2, t1, t2)
+#     # Save all reachable paths P(n1,n2,t1,t2) in a dataframe
+#     df = []
+#     tdistances = []
+#     reached = set()
+#     for n1 in spl:
+#         # Parent of source node
+#         p1 = n1 % N
+#         t1 = n1 // N
+#         for n2 in spl[n1]:
+#             p2 = n2 % N
+#             t2 = n2 // N
+#             # Nodes with different parents and timestamps
+#             if p1 != p2:
+#                 # Add path to reachability dataframe
+#                 df.append((p1, p2, t1, t2))
+#                 tdistances.append(spl[n1][n2])
+#                 # Update paths dictionary
+#                 all_paths[(p1, p2, t1, t2)] = spl[n1][n2]
+#                 # Saved observed paths so can remaining can be calculated
+#                 reached.add((p1, p2, t1, t2))
+#     # Add unexisting paths to dataframe
+#     rem = set(all_paths.keys()).difference(reached)
+#     for path in rem:
+#         df.append((path[0], path[1], path[2], path[3]))
+#         tdistances.append(np.inf)
+
+#     # Create dataframe of reachability
+#     # df = pd.DataFrame(df, columns=['n1', 'n2', 't1', 't2', 'd'])
+#     df = pd.DataFrame(df, columns=['n1', 'n2', 't1', 't2'])
+#     df['d'] = tdistances
+
+#     # Check paths for hop number or node-distance (not temporal distance)
+#     ndistances = []
+#     between = {}
+#     # TODO fix following
+#     for n1 in spl:
+#         p1 = n1 % N
+#         t1 = n1 // N
+#         for n2 in spl[n1]:
+#             p2 = n2 % N
+#             t2 = n2 // N
+#             if p1 != p2:
+#                 q = df.loc[(df['n1'] == p1) & (df['n2'] == p2) &
+#                            (df['t1'] >= t1) & (df['t2'] <= t2)]
+#                 # If there is only one node (1-hop) between two nodes A -> B
+#                 if q.d.min() == 1:
+#                     ndistances.append(1)
+
+#                 # If it is not a direct connection and intermediate nodes are incolved
+#                 if q.d.min() > 1:
+#                     # Look at the different shortest paths
+#                     sps = [np.array(p)%N for p in nx.all_shortest_paths(T, source=n1, target=n2)]
+#                     # Extract the intermediate nodes
+#                     # Save in a dictionary based on length
+#                     spd = defaultdict(list)
+#                     for x in sps:
+#                         # Remove consecutive nodes (same node, next or previous time)
+#                         temp = [v for i, v in enumerate(x) if i == 0 or v != x[i-1]]
+#                         spd[len(temp)].append(temp)
+#                     # Check the shortest extracted paths
+#                     min_hop = min(spd.keys())
+#                     ndistances.append(min_hop)
+#                     for x in spd[min_hop]:
+#                         int_nodes = np.unique(x[1:-1])
+#                     sps = spd[min(spd.keys())]
+
+#     # Sort the dataframe
+#     df.sort_values(
+#         by=['n1', 'n2', 't1', 't2'],
+#         inplace=True,
+#         ignore_index=True,
+#     )
+
+#     # Save paths distance dataframe
+#     df.to_csv(file_out[0], header=False, index=False)
+
 
 def reachability(
     folder_in=NETWORK,
@@ -4334,6 +4493,7 @@ def reachability(
     ],
     file_out=[
         'reachability.csv',
+        'reachability.p',
     ],
     label_folder_in='',
     label_folder_out='',
@@ -4343,8 +4503,7 @@ def reachability(
     times=None,
     nodes=None,
     ew=None,
-    # output=True,
-    # plot=False,
+    output=True,
     save=True,
 ):
     # Edit paths
@@ -4385,31 +4544,31 @@ def reachability(
     T = len(times)
 
     # Reading edge weight
-    if ew is None:
-        ew = ew_read(
-            folder_in,
-            [file_in[3]],
-            label_folder_in,
-            label_file_in,
-        )
+    # if ew is None:
+    #     ew = ew_read(
+    #         folder_in,
+    #         [file_in[3]],
+    #         label_folder_in,
+    #         label_file_in,
+    #     )
 
-    # Dictionary of all path lengths or reachability
-    paths = {}
-    for n1 in range(28):
-        for t1 in range(300):
-            for n2 in range(28):
-                for t2 in range(300):
+    # All possible paths
+    all_paths = {}
+    for n1 in range(N):
+        for t1 in range(T + 1):
+            for n2 in range(N):
+                for t2 in range(T + 1):
                     if n1 != n2 and t1 < t2:
-                        paths[(n1, n2, t1, t2)] = np.inf
-    paths_size = len(paths)
+                        all_paths[(n1, n2, t1, t2)] = {'d': np.inf}
 
-    # Shortest path lenght of all nodes
+    # All existing network shortest path lenght (SPL)
     spl = dict(nx.all_pairs_shortest_path_length(graph))
 
-    # Dataframe of all reachable paths P(n1,n2,t1,t2)
-    df = []
-    tdistances = []
-    reached = set()
+    # Convert N1 -> N2 to Path of (Parent N1, Parent N2, t1, t2)
+    # Save all reachable paths P(n1,n2,t1,t2) in a dataframe
+    reached = []
+    r = 0
+
     for n1 in spl:
         # Parent of source node
         p1 = n1 % N
@@ -4419,68 +4578,89 @@ def reachability(
             t2 = n2 // N
             # Nodes with different parents and timestamps
             if p1 != p2:
-                # Add path to reachability dataframe
-                # df.append((p1, p2, t1, t2, spl[n1][n2]))
-                df.append((p1, p2, t1, t2))
-                tdistances.append(spl[n1][n2])
-                # Update paths dictionary
-                paths[(p1, p2, t1, t2)] = spl[n1][n2]
-                # Saved observed paths so can remaining can be calculated
-                reached.add((p1, p2, t1, t2))
-    # Add unexisting paths to dataframe
-    rem = set(paths.keys()).difference(reached)
-    for path in rem:
-        df.append((path[0], path[1], path[2], path[3]))
-        tdistances.append(np.inf)
+                # Add path lenght
+                reached.append((p1, p2, t1, t2, spl[n1][n2]))
+                # Add temporal distance to path
+                all_paths[(p1, p2, t1, t2)]['d'] = spl[n1][n2]
+                # Add the number of reached paths
+                r += 1
 
-    # Create dataframe of reachability
-    # df = pd.DataFrame(df, columns=['n1', 'n2', 't1', 't2', 'd'])
-    df = pd.DataFrame(df, columns=['n1', 'n2', 't1', 't2'])
-    df['d'] = tdistances
+    if output:
+        print(f'Number of reachable paths is {r}', end='')
+        print(f'from a total of {len(all_paths)} possoble paths or ', end='')
+        print(f'{r/len(all_paths)*100:0.2f} %')
 
-    # Check paths for hop number or node-distance (not temporal distance)
-    ndistances = []
-    between = {}
-    # TODO fix following
-    for n1 in spl:
-        p1 = n1 % N
-        t1 = n1 // N
-        for n2 in spl[n1]:
-            p2 = n2 % N
-            t2 = n2 // N
-            if p1 != p2:
-                q = df.loc[(df['n1'] == p1) & (df['n2'] == p2) &
-                           (df['t1'] >= t1) & (df['t2'] <= t2)]
-                # If there is only one node (1-hop) between two nodes A -> B
-                if q.d.min() == 1:
-                    ndistances.append(1)
+    # Create dataframe of reachability -> Easy to use for path filtering
+    df = pd.DataFrame(reached, columns=['n1', 'n2', 't1', 't2', 'd'])
 
-                # If it is not a direct connection and intermediate nodes are incolved
-                if q.d.min() > 1:
-                    # Look at the different shortest paths
-                    sps = [np.array(p)%N for p in nx.all_shortest_paths(T, source=n1, target=n2)]
-                    # Extract the intermediate nodes
-                    # Save in a dictionary based on length
-                    spd = defaultdict(list)
-                    for x in sps:
-                        # Remove consecutive nodes (same node, next or previous time)
-                        temp = [v for i, v in enumerate(x) if i == 0 or v != x[i-1]]
-                        spd[len(temp)].append(temp)
-                    # Check the shortest extracted paths
-                    min_hop = min(spd.keys())
-                    ndistances.append(min_hop)
-                    for x in spd[min_hop]:
-                        int_nodes = np.unique(x[1:-1])
-                    sps = spd[min(spd.keys())]
+    # Check paths for hop-number or node-distance
+    cc = 0  # Counter
+    cr = 0  # Counter % passed
+    cl = int(0.01 * r)  # Counter limit = 1 % of all paths
+    for (p1, p2, t1, t2), val in all_paths.items():
+        d = val['d']
+        if d < np.inf:
+            cc += 1
+            if cc % cl == 0:
+                cr += 1
+                print(f'Processed {cr} % of all data ...')
+            mind = 0
+            # Check if there is a path with shorter temporal distance
+            q = df.loc[(df['n1'] == p1) & (df['n2'] == p2) & (df['t1'] >= t1) &
+                       (df['t2'] <= t2) & (df['d'] < d)]
+            # Check if it is direct edge or 1-hop between two nodes
+            # But in a shoeter time interval included in larger time window
+            if q.d.min() == 1:
+                # ndistances.append(1)
+                mind = 1
+                all_paths[(p1, p2, t1, t2)]['h'] = 1
 
+            # If it is not a direct connection
+            # And there are some intermediate nodes incolved
+            if q.d.min() > 1:
+                # Look at all shortest paths in that time range
+                sps = [
+                    np.array(p) % N for p in nx.all_shortest_paths(
+                        graph,
+                        source=(N * t1) + p1,
+                        target=(N * t2) + p2,
+                    )
+                ]
+                # Extract  intermediate nodes
+                # And save in a dictionary based on path length
+                spd = defaultdict(list)
+                for x in sps:
+                    # Remove consecutive nodes (same node, next or previous time)
+                    temp = [
+                        v for i, v in enumerate(x) if i == 0 or v != x[i - 1]
+                    ]
+                    spd[len(temp)].append(temp)
+                # Check only the shortest extracted paths
+                mind = min(spd.keys())
+                spd = spd[mind]
+                # Minus 1 (-1) because hop length is 1 less than number of nodes
+                all_paths[(p1, p2, t1, t2)]['h'] = mind - 1
+                # Unique intermediate nodes invole in shortest path
+                paths = paths = set()
+                for x in spd:
+                    paths.add(tuple(x[1:-1]))
+                all_paths[(p1, p2, t1, t2)]['p'] = [list(x) for x in paths]
+        else:
+            # Path does not exist
+            # Distance is infinity
+            # Then add to REACHED list to create new DF
+            reached.append((p1, p2, t1, t2, np.inf))
 
-
-    # Sort the dataframe
+    # Create reachability again LOL
+    df = pd.DataFrame(reached, columns=['n1', 'n2', 't1', 't2', 'd'])
+    # Then sort ...
     df.sort_values(
         by=['n1', 'n2', 't1', 't2'],
         inplace=True,
         ignore_index=True,
     )
-
-    # Save paths distance dataframe
-    df.to_csv(file_out[0], header=False, index=False)
+    # Finally save reachability dataframe and Hop dictionary
+    if save:
+        df.to_csv(file_out[0], header=False, index=False)
+        with open(file_out[1], 'wb') as fp:
+            pickle.dump(all_paths, fp, protocol=pickle.HIGHEST_PROTOCOL)
